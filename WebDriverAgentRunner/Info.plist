@@ -26,5 +26,9 @@
 	<string></string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>WebDriverAgent imports media into Photos for automation.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>WebDriverAgent reads and clears Photos assets for automation.</string>
 </dict>
 </plist>

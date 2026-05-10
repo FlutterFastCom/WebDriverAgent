@@ -11,6 +11,7 @@
 #import "FBCapabilities.h"
 #import "FBClassChainQueryParser.h"
 #import "FBConfiguration.h"
+#import "FBCustomEndpointTokens.h"
 #import "FBExceptions.h"
 #import "FBLogger.h"
 #import "FBProtocolHelpers.h"
@@ -309,6 +310,7 @@
 #endif
           @"ip" : [XCUIDevice sharedDevice].fb_wifiIPAddress ?: [NSNull null]
         },
+      @"customEndpoints" : FBCustomEndpointTokens,
       @"build" : buildInfo.copy,
       @"device": [self.class deviceNameByUserInterfaceIdiom:[UIDevice currentDevice].userInterfaceIdiom]
     }
