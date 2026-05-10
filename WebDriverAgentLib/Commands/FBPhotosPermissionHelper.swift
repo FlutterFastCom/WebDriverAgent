@@ -14,11 +14,31 @@ import Photos
 @objc(FBPhotosPermissionHelper)
 final class FBPhotosPermissionHelper: NSObject {
   static func hasReadWriteAuthorization(allowLimited: Bool) -> Bool {
-    // WDA 11.4.3 routes are synchronous and run on the main queue, so these
-    // endpoints do not trigger a PhotoKit permission prompt. Callers must
-    // pre-grant Photos access; .notDetermined is treated as unsupported.
+    // PATCH 2026-05-10: branch shipped with `.notDetermined → unsupported` semantics
+    // (skipping requestAuthorization). Empirical test on iPhone 14 Pro / iOS 26.1 showed
+    // bundle never appeared in Settings → Privacy & Security → Photos because
+    // requestAuthorization was never called → no TCC registration.
+    //
+    // Fix: trigger requestAuthorization once on .notDetermined. iOS auto-denies for
+    // XCTest test runners (no UI surface to show prompt) but the call REGISTERS the
+    // bundle in the TCC database — TrafficTitans row then appears in Settings →
+    // Privacy & Security → Photos. From there, EITHER user grants manually, OR our
+    // /wda/system/photos-permission/grant endpoint (TIER 3b #21, F-WDA-FORK-EXTENSIONS)
+    // auto-navigates Settings to tap Full Access. dispatch_semaphore wait runs on
+    // DispatchQueue.global() (NOT main) per F-doc P0 invariant — avoids deadlocking
+    // the WDA HTTP server.
     if #available(iOS 14, *) {
-      let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+      var currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+      if currentStatus == .notDetermined {
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+          PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+            currentStatus = status
+            semaphore.signal()
+          }
+        }
+        _ = semaphore.wait(timeout: .now() + 5)
+      }
       return currentStatus == .authorized || (allowLimited && currentStatus == .limited)
     }
 
