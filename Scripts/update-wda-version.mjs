@@ -8,7 +8,7 @@ const log = logger.getLogger('Versioner');
  * @param {string} argName
  * @returns {string|null}
  */
-function parseArgValue (argName) {
+function parseArgValue(argName) {
   const argNamePattern = new RegExp(`^--${argName}\\b`);
   for (let i = 1; i < process.argv.length; ++i) {
     const arg = process.argv[i];
@@ -26,17 +26,20 @@ async function updateWdaVersion() {
   }
   if (!semver.valid(newVersion)) {
     throw new Error(
-      `Invalid version specified '${newVersion}'. Version should be in the form '1.2.3'`
+      `Invalid version specified '${newVersion}'. Version should be in the form '1.2.3'`,
     );
   }
 
   const libManifest = path.resolve('WebDriverAgentLib', 'Info.plist');
   log.info(`Updating the WebDriverAgent manifest at '${libManifest}' to version '${newVersion}'`);
-  await plist.updatePlistFile(libManifest, {
-    CFBundleShortVersionString: newVersion,
-    CFBundleVersion: newVersion,
-  }, false);
+  await plist.updatePlistFile(
+    libManifest,
+    {
+      CFBundleShortVersionString: newVersion,
+      CFBundleVersion: newVersion,
+    },
+    false,
+  );
 }
 
 (async () => await updateWdaVersion())();
-

@@ -29,4 +29,3 @@ runs:
         bundle install
         mkdir -p ./Resources/WebDriverAgent.bundle
       shell: bash
-

@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
 import axios from 'axios';
-import { logger, fs, mkdirp, net } from '@appium/support';
+import {logger, fs, mkdirp, net} from '@appium/support';
 import _ from 'lodash';
 import B from 'bluebird';
 
@@ -12,21 +12,25 @@ const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === __file
 
 const log = logger.getLogger('WDA');
 
-async function fetchPrebuiltWebDriverAgentAssets () {
-  const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+async function fetchPrebuiltWebDriverAgentAssets() {
+  const packageJson = JSON.parse(
+    readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'),
+  );
   const tag = packageJson.version;
   log.info(`Getting links to webdriveragent release ${tag}`);
   const downloadUrl = `https://api.github.com/repos/appium/webdriveragent/releases/tags/v${tag}`;
   log.info(`Getting WDA release ${downloadUrl}`);
   let releases;
   try {
-    releases = (await axios({
-      url: downloadUrl,
-      headers: {
-        'user-agent': 'appium',
-        'accept': 'application/json, */*',
-      },
-    })).data;
+    releases = (
+      await axios({
+        url: downloadUrl,
+        headers: {
+          'user-agent': 'appium',
+          accept: 'application/json, */*',
+        },
+      })
+    ).data;
   } catch (e) {
     throw new Error(`Could not fetch endpoint ${downloadUrl}. Reason: ${e.message}`);
   }
@@ -37,7 +41,7 @@ async function fetchPrebuiltWebDriverAgentAssets () {
   await mkdirp(webdriveragentsDir);
 
   // Define a method that does a streaming download of an asset
-  async function downloadAgent (url, targetPath) {
+  async function downloadAgent(url, targetPath) {
     try {
       await net.downloadFile(url, targetPath);
     } catch (err) {
@@ -53,7 +57,7 @@ async function fetchPrebuiltWebDriverAgentAssets () {
     try {
       const nameOfAgent = _.last(url.split('/'));
       agentsDownloading.push(downloadAgent(url, path.join(webdriveragentsDir, nameOfAgent)));
-    } catch { }
+    } catch {}
   }
 
   // Wait for them all to finish
@@ -68,4 +72,3 @@ if (isMainModule) {
 }
 
 export default fetchPrebuiltWebDriverAgentAssets;
-

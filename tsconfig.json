@@ -13,8 +13,5 @@
       "rootDir": "."
     }
   },
-  "include": [
-    "lib",
-    "test"
-  ]
+  "include": ["lib", "test"]
 }
