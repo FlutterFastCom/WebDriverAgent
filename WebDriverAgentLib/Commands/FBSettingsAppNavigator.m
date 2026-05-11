@@ -47,12 +47,29 @@ static NSError *TTNavError(NSInteger code, NSString *message, NSDictionary *extr
   XCUIApplication *settings = self.settingsApp;
   for (NSString *label in labels) {
     [self dismissAnyAlerts];
-    XCUIElement *cell = [[settings.cells matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", label]] firstMatch];
+    NSPredicate *pred = [NSPredicate predicateWithFormat:@"label CONTAINS %@", label];
+    XCUIElement *cell = [[settings.cells matchingPredicate:pred] firstMatch];
     if (![cell exists]) {
-      XCUIElement *scroll = [[settings.scrollViews firstMatch] exists] ? [settings.scrollViews firstMatch] : [settings.windows firstMatch];
-      [scroll swipeUp];
-      [NSThread sleepForTimeInterval:0.35];
-      cell = [[settings.cells matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", label]] firstMatch];
+      // iOS 26 Settings.app uses XCUIElementTypeCollectionView (UICollectionView migration).
+      // Fall back through container types; window is the last resort.
+      XCUIElement *container = [settings.collectionViews firstMatch];
+      if (![container exists]) container = [settings.scrollViews firstMatch];
+      if (![container exists]) container = [settings.tables firstMatch];
+      if (![container exists]) container = [settings.windows firstMatch];
+      // Phase 1: swipe up (content moves up, reveals BELOW). Most common case.
+      for (NSUInteger i = 0; i < 6 && ![cell exists]; i++) {
+        [container swipeUp];
+        [NSThread sleepForTimeInterval:0.35];
+        [self dismissAnyAlerts];
+        cell = [[settings.cells matchingPredicate:pred] firstMatch];
+      }
+      // Phase 2: not below — try ABOVE via swipeDown. Budget covers the full 4-page list.
+      for (NSUInteger i = 0; i < 10 && ![cell exists]; i++) {
+        [container swipeDown];
+        [NSThread sleepForTimeInterval:0.35];
+        [self dismissAnyAlerts];
+        cell = [[settings.cells matchingPredicate:pred] firstMatch];
+      }
     }
     if (![cell exists]) {
       if (error) *error = TTNavError(2, [NSString stringWithFormat:@"label not found: %@", label], @{@"missingLabel": label});
