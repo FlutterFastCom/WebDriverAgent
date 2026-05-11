@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { logger, fs } from '@appium/support';
-import { exec } from 'teen_process';
+import {fileURLToPath} from 'node:url';
+import {logger, fs} from '@appium/support';
+import {exec} from 'teen_process';
 import * as xcode from 'appium-xcode';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,7 +15,12 @@ const WDA_BUNDLE = 'WebDriverAgentRunner-Runner.app';
 const WDA_BUNDLE_PATH = path.join(DERIVED_DATA_PATH, 'Build', 'Products', 'Debug-iphonesimulator');
 
 const WDA_BUNDLE_TV = 'WebDriverAgentRunner_tvOS-Runner.app';
-const WDA_BUNDLE_TV_PATH = path.join(DERIVED_DATA_PATH, 'Build', 'Products', 'Debug-appletvsimulator');
+const WDA_BUNDLE_TV_PATH = path.join(
+  DERIVED_DATA_PATH,
+  'Build',
+  'Products',
+  'Debug-appletvsimulator',
+);
 
 const TARGETS = ['runner', 'tv_runner'];
 const SDKS = ['sim', 'tv_sim'];
@@ -25,35 +30,42 @@ const SDKS = ['sim', 'tv_sim'];
  *
  * @param {string} [xcodeVersion] Xcode version to include in archive name.
  */
-async function buildWebDriverAgent (xcodeVersion) {
+async function buildWebDriverAgent(xcodeVersion) {
   const target = process.env.TARGET;
   const sdk = process.env.SDK;
 
   if (!TARGETS.includes(target)) {
-    throw Error(`Please set TARGETS environment variable from the supported targets ${JSON.stringify(TARGETS)}`);
+    throw Error(
+      `Please set TARGETS environment variable from the supported targets ${JSON.stringify(TARGETS)}`,
+    );
   }
 
   if (!SDKS.includes(sdk)) {
-    throw Error(`Please set SDK environment variable from the supported SDKs ${JSON.stringify(SDKS)}`);
+    throw Error(
+      `Please set SDK environment variable from the supported SDKs ${JSON.stringify(SDKS)}`,
+    );
   }
-
 
   LOG.info(`Cleaning ${DERIVED_DATA_PATH} if exists`);
   try {
-    await exec('xcodebuild', ['clean', '-derivedDataPath', DERIVED_DATA_PATH, '-scheme', 'WebDriverAgentRunner'], {
-      cwd: ROOT_DIR
-    });
+    await exec(
+      'xcodebuild',
+      ['clean', '-derivedDataPath', DERIVED_DATA_PATH, '-scheme', 'WebDriverAgentRunner'],
+      {
+        cwd: ROOT_DIR,
+      },
+    );
   } catch {}
 
   // Get Xcode version
-  xcodeVersion = xcodeVersion || await xcode.getVersion();
+  xcodeVersion = xcodeVersion || (await xcode.getVersion());
   LOG.info(`Building WebDriverAgent for iOS using Xcode version '${xcodeVersion}'`);
 
   // Clean and build
   try {
     await exec('/bin/bash', ['./Scripts/build.sh'], {
       env: {TARGET: target, SDK: sdk, DERIVED_DATA_PATH},
-      cwd: ROOT_DIR
+      cwd: ROOT_DIR,
     });
   } catch (e) {
     LOG.error(`===FAILED TO BUILD FOR ${xcodeVersion}`);
@@ -91,4 +103,3 @@ if (isMainModule) {
 }
 
 export default buildWebDriverAgent;
-

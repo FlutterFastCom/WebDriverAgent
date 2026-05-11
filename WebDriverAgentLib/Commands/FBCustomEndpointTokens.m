@@ -35,6 +35,7 @@ NSArray<NSString *> *FBCustomEndpointTokensList(void)
       @"system.advertising-id.reset",
       @"system.cellular.data-reset",
       @"system.photos-permission.grant",
+      @"system.auto-lock.set",
       @"wifi.connect",
       @"wifi.disconnect",
       @"wifi.forget",

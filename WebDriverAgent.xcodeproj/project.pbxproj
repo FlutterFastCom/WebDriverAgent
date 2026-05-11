@@ -33,6 +33,7 @@
 		A10010A000000000000010A /* FBAppsMgmtCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000140000000000000014 /* FBAppsMgmtCommands.m */; };
 		A10010B000000000000010B /* FBBezierInterpolator.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000160000000000000016 /* FBBezierInterpolator.m */; };
 		A10010C000000000000010C /* FBInputCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000180000000000000018 /* FBInputCommands.m */; };
+		A10010D000000000000010D /* FBDisplaySettingsCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A20001A000000000000001A /* FBDisplaySettingsCommands.m */; };
 		0E0413382DF1E15100AF007C /* XCUIElement+FBMinMax.m in Sources */ = {isa = PBXBuildFile; fileRef = 0E0413372DF1E15100AF007C /* XCUIElement+FBMinMax.m */; };
 		0E0413392DF1E15100AF007C /* XCUIElement+FBMinMax.m in Sources */ = {isa = PBXBuildFile; fileRef = 0E0413372DF1E15100AF007C /* XCUIElement+FBMinMax.m */; };
 		0E04133B2DF1E15900AF007C /* XCUIElement+FBMinMax.h in Headers */ = {isa = PBXBuildFile; fileRef = 0E04133A2DF1E15900AF007C /* XCUIElement+FBMinMax.h */; };
@@ -1374,6 +1375,8 @@
 		A2000160000000000000016 /* FBBezierInterpolator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBBezierInterpolator.m; sourceTree = "<group>"; };
 		A2000170000000000000017 /* FBInputCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBInputCommands.h; sourceTree = "<group>"; };
 		A2000180000000000000018 /* FBInputCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBInputCommands.m; sourceTree = "<group>"; };
+		A2000190000000000000019 /* FBDisplaySettingsCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBDisplaySettingsCommands.h; sourceTree = "<group>"; };
+		A20001A000000000000001A /* FBDisplaySettingsCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBDisplaySettingsCommands.m; sourceTree = "<group>"; };
 		FB2000080000000000000008 /* WebDriverAgent-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "WebDriverAgent-Bridging-Header.h"; sourceTree = SOURCE_ROOT; };
 		EE9AB7451CAEDF0C008C271F /* XCUIElement+FBAccessibility.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "XCUIElement+FBAccessibility.h"; sourceTree = "<group>"; };
 		EE9AB7461CAEDF0C008C271F /* XCUIElement+FBAccessibility.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "XCUIElement+FBAccessibility.m"; sourceTree = "<group>"; };
@@ -1925,6 +1928,8 @@
 				A2000160000000000000016 /* FBBezierInterpolator.m */,
 				A2000170000000000000017 /* FBInputCommands.h */,
 				A2000180000000000000018 /* FBInputCommands.m */,
+				A2000190000000000000019 /* FBDisplaySettingsCommands.h */,
+				A20001A000000000000001A /* FBDisplaySettingsCommands.m */,
 				FB2000070000000000000007 /* FBPhotoTypes.swift */,
 				FB2000020000000000000002 /* FBPhotosBridge.h */,
 				FB2000010000000000000001 /* FBPhotosBridge.m */,
@@ -3457,6 +3462,7 @@
 				A10010A000000000000010A /* FBAppsMgmtCommands.m in Sources */,
 				A10010B000000000000010B /* FBBezierInterpolator.m in Sources */,
 				A10010C000000000000010C /* FBInputCommands.m in Sources */,
+				A10010D000000000000010D /* FBDisplaySettingsCommands.m in Sources */,
 				AD6C26991CF2481700F8B5FF /* XCUIDevice+FBHelpers.m in Sources */,
 				716C9E0227315EFF005AD475 /* XCUIApplication+FBUIInterruptions.m in Sources */,
 				EE6B64FE1D0F86EF00E85F5D /* XCTestPrivateSymbols.m in Sources */,
