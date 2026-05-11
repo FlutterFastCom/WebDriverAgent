@@ -50,7 +50,7 @@
 + (id<FBResponsePayload>)handleClear:(FBRouteRequest *)request
 {
   if (![self hasClearConfirmationInRequest:request]) {
-    return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"error": @"missing_confirm_header"}
+    return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"error": @"missing_confirm_marker"}
                                              httpStatusCode:kHTTPStatusCodePreconditionFailed];
   }
 
@@ -94,19 +94,16 @@
 
 + (BOOL)hasClearConfirmationInRequest:(FBRouteRequest *)request
 {
-  // This WDA baseline does not expose HTTP headers on FBRouteRequest. Keep the
-  // wipe gate route-compatible by accepting an explicit body/query confirmation
-  // value while preserving the response shape required for missing confirmation.
-  id bodyHeaderValue = request.arguments[@"X-Confirm-Wipe"] ?: request.arguments[@"x-confirm-wipe"];
-  if ([bodyHeaderValue isKindOfClass:NSString.class] && [bodyHeaderValue isEqualToString:@"YES"]) {
-    return YES;
-  }
+  // This WDA baseline does not expose HTTP headers on FBRouteRequest. The
+  // locked wipe-confirm mechanism is the explicit confirmWipe marker in the
+  // JSON body or query string. Legacy header-shaped body/query aliases are
+  // rejected so clients cannot accidentally rely on stale header semantics.
   if ([request.arguments[@"confirmWipe"] boolValue]) {
     return YES;
   }
   NSURLComponents *components = [NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
   for (NSURLQueryItem *item in components.queryItems) {
-    if ([item.name caseInsensitiveCompare:@"X-Confirm-Wipe"] == NSOrderedSame && [item.value isEqualToString:@"YES"]) {
+    if ([item.name isEqualToString:@"confirmWipe"] && [item.value.lowercaseString isEqualToString:@"true"]) {
       return YES;
     }
   }

@@ -29,4 +29,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+#ifndef FBLogVerbose
+#define FBLogVerbose(format, ...) [FBLogger verboseLogFmt:(format), ##__VA_ARGS__]
+#endif
+
+#ifndef FBLogInfo
+#define FBLogInfo(format, ...) [FBLogger logFmt:(format), ##__VA_ARGS__]
+#endif
+
+#ifndef FBLogWarn
+#define FBLogWarn(format, ...) [FBLogger logFmt:(format), ##__VA_ARGS__]
+#endif
+
+#ifndef FBLogError
+#define FBLogError(format, ...) [FBLogger logFmt:(format), ##__VA_ARGS__]
+#endif
+
 NS_ASSUME_NONNULL_END

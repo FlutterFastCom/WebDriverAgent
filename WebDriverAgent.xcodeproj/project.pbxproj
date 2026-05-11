@@ -21,6 +21,18 @@
 		FB10000C000000000000000C /* FBCustomEndpointTokens.h in Headers */ = {isa = PBXBuildFile; fileRef = FB2000060000000000000006 /* FBCustomEndpointTokens.h */; };
 		FB10000D000000000000000D /* FBPhotoTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000070000000000000007 /* FBPhotoTypes.swift */; };
 		FB10000E000000000000000E /* FBPhotoTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000070000000000000007 /* FBPhotoTypes.swift */; };
+		A1001010000000000000101 /* FBForegroundTracker.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000020000000000000002 /* FBForegroundTracker.m */; };
+		A1001020000000000000102 /* FBPerfCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000040000000000000004 /* FBPerfCommands.m */; };
+		A1001030000000000000103 /* FBAppDataCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000060000000000000006 /* FBAppDataCommands.m */; };
+		A1001040000000000000104 /* FBNetworkCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000080000000000000008 /* FBNetworkCommands.m */; };
+		A1001050000000000000105 /* FBKeyboardPasteCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000A000000000000000A /* FBKeyboardPasteCommands.m */; };
+		A1001060000000000000106 /* FBSettingsAppNavigator.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000C000000000000000C /* FBSettingsAppNavigator.m */; };
+		A1001070000000000000107 /* FBSystemSettingsCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000E000000000000000E /* FBSystemSettingsCommands.m */; };
+		A1001080000000000000108 /* FBKeyboardSettingsCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000100000000000000010 /* FBKeyboardSettingsCommands.m */; };
+		A1001090000000000000109 /* FBWifiCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000120000000000000012 /* FBWifiCommands.m */; };
+		A10010A000000000000010A /* FBAppsMgmtCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000140000000000000014 /* FBAppsMgmtCommands.m */; };
+		A10010B000000000000010B /* FBBezierInterpolator.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000160000000000000016 /* FBBezierInterpolator.m */; };
+		A10010C000000000000010C /* FBInputCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000180000000000000018 /* FBInputCommands.m */; };
 		0E0413382DF1E15100AF007C /* XCUIElement+FBMinMax.m in Sources */ = {isa = PBXBuildFile; fileRef = 0E0413372DF1E15100AF007C /* XCUIElement+FBMinMax.m */; };
 		0E0413392DF1E15100AF007C /* XCUIElement+FBMinMax.m in Sources */ = {isa = PBXBuildFile; fileRef = 0E0413372DF1E15100AF007C /* XCUIElement+FBMinMax.m */; };
 		0E04133B2DF1E15900AF007C /* XCUIElement+FBMinMax.h in Headers */ = {isa = PBXBuildFile; fileRef = 0E04133A2DF1E15900AF007C /* XCUIElement+FBMinMax.h */; };
@@ -1338,6 +1350,30 @@
 		FB2000050000000000000005 /* FBCustomEndpointTokens.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBCustomEndpointTokens.m; sourceTree = "<group>"; };
 		FB2000060000000000000006 /* FBCustomEndpointTokens.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBCustomEndpointTokens.h; sourceTree = "<group>"; };
 		FB2000070000000000000007 /* FBPhotoTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FBPhotoTypes.swift; sourceTree = "<group>"; };
+		A2000010000000000000001 /* FBForegroundTracker.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBForegroundTracker.h; sourceTree = "<group>"; };
+		A2000020000000000000002 /* FBForegroundTracker.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBForegroundTracker.m; sourceTree = "<group>"; };
+		A2000030000000000000003 /* FBPerfCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBPerfCommands.h; sourceTree = "<group>"; };
+		A2000040000000000000004 /* FBPerfCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBPerfCommands.m; sourceTree = "<group>"; };
+		A2000050000000000000005 /* FBAppDataCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBAppDataCommands.h; sourceTree = "<group>"; };
+		A2000060000000000000006 /* FBAppDataCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBAppDataCommands.m; sourceTree = "<group>"; };
+		A2000070000000000000007 /* FBNetworkCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBNetworkCommands.h; sourceTree = "<group>"; };
+		A2000080000000000000008 /* FBNetworkCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBNetworkCommands.m; sourceTree = "<group>"; };
+		A2000090000000000000009 /* FBKeyboardPasteCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBKeyboardPasteCommands.h; sourceTree = "<group>"; };
+		A20000A000000000000000A /* FBKeyboardPasteCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBKeyboardPasteCommands.m; sourceTree = "<group>"; };
+		A20000B000000000000000B /* FBSettingsAppNavigator.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBSettingsAppNavigator.h; sourceTree = "<group>"; };
+		A20000C000000000000000C /* FBSettingsAppNavigator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBSettingsAppNavigator.m; sourceTree = "<group>"; };
+		A20000D000000000000000D /* FBSystemSettingsCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBSystemSettingsCommands.h; sourceTree = "<group>"; };
+		A20000E000000000000000E /* FBSystemSettingsCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBSystemSettingsCommands.m; sourceTree = "<group>"; };
+		A20000F000000000000000F /* FBKeyboardSettingsCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBKeyboardSettingsCommands.h; sourceTree = "<group>"; };
+		A2000100000000000000010 /* FBKeyboardSettingsCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBKeyboardSettingsCommands.m; sourceTree = "<group>"; };
+		A2000110000000000000011 /* FBWifiCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBWifiCommands.h; sourceTree = "<group>"; };
+		A2000120000000000000012 /* FBWifiCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBWifiCommands.m; sourceTree = "<group>"; };
+		A2000130000000000000013 /* FBAppsMgmtCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBAppsMgmtCommands.h; sourceTree = "<group>"; };
+		A2000140000000000000014 /* FBAppsMgmtCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBAppsMgmtCommands.m; sourceTree = "<group>"; };
+		A2000150000000000000015 /* FBBezierInterpolator.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBBezierInterpolator.h; sourceTree = "<group>"; };
+		A2000160000000000000016 /* FBBezierInterpolator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBBezierInterpolator.m; sourceTree = "<group>"; };
+		A2000170000000000000017 /* FBInputCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBInputCommands.h; sourceTree = "<group>"; };
+		A2000180000000000000018 /* FBInputCommands.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBInputCommands.m; sourceTree = "<group>"; };
 		FB2000080000000000000008 /* WebDriverAgent-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "WebDriverAgent-Bridging-Header.h"; sourceTree = SOURCE_ROOT; };
 		EE9AB7451CAEDF0C008C271F /* XCUIElement+FBAccessibility.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "XCUIElement+FBAccessibility.h"; sourceTree = "<group>"; };
 		EE9AB7461CAEDF0C008C271F /* XCUIElement+FBAccessibility.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "XCUIElement+FBAccessibility.m"; sourceTree = "<group>"; };
@@ -1865,6 +1901,30 @@
 				FB2000050000000000000005 /* FBCustomEndpointTokens.m */,
 				EE9AB7521CAEDF0C008C271F /* FBCustomCommands.h */,
 				EE9AB7531CAEDF0C008C271F /* FBCustomCommands.m */,
+				A2000010000000000000001 /* FBForegroundTracker.h */,
+				A2000020000000000000002 /* FBForegroundTracker.m */,
+				A2000030000000000000003 /* FBPerfCommands.h */,
+				A2000040000000000000004 /* FBPerfCommands.m */,
+				A2000050000000000000005 /* FBAppDataCommands.h */,
+				A2000060000000000000006 /* FBAppDataCommands.m */,
+				A2000070000000000000007 /* FBNetworkCommands.h */,
+				A2000080000000000000008 /* FBNetworkCommands.m */,
+				A2000090000000000000009 /* FBKeyboardPasteCommands.h */,
+				A20000A000000000000000A /* FBKeyboardPasteCommands.m */,
+				A20000B000000000000000B /* FBSettingsAppNavigator.h */,
+				A20000C000000000000000C /* FBSettingsAppNavigator.m */,
+				A20000D000000000000000D /* FBSystemSettingsCommands.h */,
+				A20000E000000000000000E /* FBSystemSettingsCommands.m */,
+				A20000F000000000000000F /* FBKeyboardSettingsCommands.h */,
+				A2000100000000000000010 /* FBKeyboardSettingsCommands.m */,
+				A2000110000000000000011 /* FBWifiCommands.h */,
+				A2000120000000000000012 /* FBWifiCommands.m */,
+				A2000130000000000000013 /* FBAppsMgmtCommands.h */,
+				A2000140000000000000014 /* FBAppsMgmtCommands.m */,
+				A2000150000000000000015 /* FBBezierInterpolator.h */,
+				A2000160000000000000016 /* FBBezierInterpolator.m */,
+				A2000170000000000000017 /* FBInputCommands.h */,
+				A2000180000000000000018 /* FBInputCommands.m */,
 				FB2000070000000000000007 /* FBPhotoTypes.swift */,
 				FB2000020000000000000002 /* FBPhotosBridge.h */,
 				FB2000010000000000000001 /* FBPhotosBridge.m */,
@@ -3385,6 +3445,18 @@
 				FB10000A000000000000000A /* FBCustomEndpointTokens.m in Sources */,
 				EE158ABB1CBD456F00A3E3F0 /* FBCustomCommands.m in Sources */,
 				FB1000020000000000000002 /* FBPhotosBridge.m in Sources */,
+				A1001010000000000000101 /* FBForegroundTracker.m in Sources */,
+				A1001020000000000000102 /* FBPerfCommands.m in Sources */,
+				A1001030000000000000103 /* FBAppDataCommands.m in Sources */,
+				A1001040000000000000104 /* FBNetworkCommands.m in Sources */,
+				A1001050000000000000105 /* FBKeyboardPasteCommands.m in Sources */,
+				A1001060000000000000106 /* FBSettingsAppNavigator.m in Sources */,
+				A1001070000000000000107 /* FBSystemSettingsCommands.m in Sources */,
+				A1001080000000000000108 /* FBKeyboardSettingsCommands.m in Sources */,
+				A1001090000000000000109 /* FBWifiCommands.m in Sources */,
+				A10010A000000000000010A /* FBAppsMgmtCommands.m in Sources */,
+				A10010B000000000000010B /* FBBezierInterpolator.m in Sources */,
+				A10010C000000000000010C /* FBInputCommands.m in Sources */,
 				AD6C26991CF2481700F8B5FF /* XCUIDevice+FBHelpers.m in Sources */,
 				716C9E0227315EFF005AD475 /* XCUIApplication+FBUIInterruptions.m in Sources */,
 				EE6B64FE1D0F86EF00E85F5D /* XCTestPrivateSymbols.m in Sources */,
