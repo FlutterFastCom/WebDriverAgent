@@ -24,18 +24,21 @@ static NSError *TTNavError(NSInteger code, NSString *message, NSDictionary *extr
 
 - (XCUIApplication *)settingsApp { return [[XCUIApplication alloc] initWithBundleIdentifier:@"com.apple.Preferences"]; }
 
+// bugfix-07 (2026-05-11): Option C — terminate + relaunch instead of back-button-loop.
+// The previous back-button matcher whitelist drifted on iOS 17+ (Accessibility,
+// Display & Brightness, etc. become parent-page labels never enumerated). Inclusive
+// alternatives (any-labeled-button) match Edit/search buttons on root → wrong tap.
+// Cold-relaunch is locale-independent, iOS-version-stable, and guarantees clean root.
 - (BOOL)launchSettings:(NSError **)error
 {
   XCUIApplication *settings = self.settingsApp;
-  [settings activate];
-  [NSThread sleepForTimeInterval:0.8];
-  for (NSUInteger i = 0; i < 8; i++) {
-    [self dismissAnyAlerts];
-    XCUIElement *back = [[settings.buttons matchingPredicate:[NSPredicate predicateWithFormat:@"label == 'Back' OR label BEGINSWITH 'Settings' OR label BEGINSWITH 'Wi-Fi' OR label BEGINSWITH 'General'"]] firstMatch];
-    if (![back exists]) { break; }
-    [back tap];
-    [NSThread sleepForTimeInterval:0.25];
+  if (settings.state == XCUIApplicationStateRunningForeground) {
+    [settings terminate];
+    [NSThread sleepForTimeInterval:0.5];
   }
+  [settings launch];
+  [NSThread sleepForTimeInterval:0.8];
+  [self dismissAnyAlerts];
   if (settings.state != XCUIApplicationStateRunningForeground) {
     if (error) *error = TTNavError(1, @"failed to launch Settings", nil);
     return NO;
