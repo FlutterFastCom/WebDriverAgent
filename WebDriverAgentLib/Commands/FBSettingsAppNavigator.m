@@ -1,6 +1,7 @@
 /** Copyright (c) 2015-present, Facebook, Inc. */
 #import "FBSettingsAppNavigator.h"
 #import "FBLogger.h"
+#import "TTElementFinder.h"
 #import "XCUIApplication.h"
 #import "XCUIElement.h"
 #import "XCUIElementQuery.h"
@@ -47,39 +48,49 @@ static NSError *TTNavError(NSInteger code, NSString *message, NSDictionary *extr
   XCUIApplication *settings = self.settingsApp;
   for (NSString *label in labels) {
     [self dismissAnyAlerts];
-    NSPredicate *pred = [NSPredicate predicateWithFormat:@"label CONTAINS %@", label];
-    XCUIElement *cell = [[settings.cells matchingPredicate:pred] firstMatch];
-    if (![cell exists]) {
-      // iOS 26 Settings.app uses XCUIElementTypeCollectionView (UICollectionView migration).
-      // Fall back through container types; window is the last resort.
-      XCUIElement *container = [settings.collectionViews firstMatch];
-      if (![container exists]) container = [settings.scrollViews firstMatch];
-      if (![container exists]) container = [settings.tables firstMatch];
-      if (![container exists]) container = [settings.windows firstMatch];
-      // Phase 1: swipe up (content moves up, reveals BELOW). Most common case.
-      for (NSUInteger i = 0; i < 6 && ![cell exists]; i++) {
-        [container swipeUp];
-        [NSThread sleepForTimeInterval:0.35];
-        [self dismissAnyAlerts];
-        cell = [[settings.cells matchingPredicate:pred] firstMatch];
-      }
-      // Phase 2: not below — try ABOVE via swipeDown. Budget covers the full 4-page list.
-      for (NSUInteger i = 0; i < 10 && ![cell exists]; i++) {
-        [container swipeDown];
-        [NSThread sleepForTimeInterval:0.35];
-        [self dismissAnyAlerts];
-        cell = [[settings.cells matchingPredicate:pred] firstMatch];
-      }
+
+    // Strategy 1: TTElementFinder handles the iOS-26 reality --
+    //  - tries XCUIElementTypeCell first (iOS <= 16), then XCUIElementTypeButton (iOS 17+)
+    //  - matches label CONTAINS[c] OR identifier CONTAINS[c]
+    //  - excludes XCUIElementTypeStaticText (non-interactive label children)
+    // Callers can pass either a marketing label (e.g., "Cellular") OR a
+    // stable accessibility id (e.g., "com.apple.settings.cellular") -- both
+    // resolve to the same row when present in the tree.
+    XCUIElement *target = [TTElementFinder findRowInApp:settings byText:label];
+
+    // Strategy 2: scroll-and-retry up to 8x for lazy/virtualized rows.
+    // iOS 26.1 Settings.app uses UICollectionView-backed lists where off-screen
+    // rows are not in the accessibility tree until scrolled into view.
+    NSUInteger maxScrolls = 8;
+    XCUIElement *scrollContainer = [self preferredScrollContainerIn:settings];
+    for (NSUInteger i = 0; i < maxScrolls && ![target exists]; i++) {
+      [scrollContainer swipeUp];
+      [NSThread sleepForTimeInterval:0.35];
+      [self dismissAnyAlerts];
+      target = [TTElementFinder findRowInApp:settings byText:label];
     }
-    if (![cell exists]) {
+
+    if (![target exists]) {
       if (error) *error = TTNavError(2, [NSString stringWithFormat:@"label not found: %@", label], @{@"missingLabel": label});
       FBLogWarn(@"FBSettingsAppNavigator label_not_found=%@", label);
       return NO;
     }
-    [cell tap];
+    [target tap];
     [NSThread sleepForTimeInterval:0.45];
   }
   return YES;
+}
+
+// Explicit scroll-container preference. iOS 26.1 Settings.app uses
+// XCUIElementTypeCollectionView (UICollectionView migration); fall back through
+// scrollViews and finally the window root.
+- (XCUIElement *)preferredScrollContainerIn:(XCUIApplication *)settings
+{
+  XCUIElement *collection = [settings.collectionViews firstMatch];
+  if ([collection exists]) { return collection; }
+  XCUIElement *scroll = [settings.scrollViews firstMatch];
+  if ([scroll exists]) { return scroll; }
+  return [settings.windows firstMatch];
 }
 
 - (BOOL)setToggle:(NSString *)label state:(BOOL)on error:(NSError **)error

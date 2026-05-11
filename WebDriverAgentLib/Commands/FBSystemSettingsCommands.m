@@ -77,7 +77,11 @@ static BOOL TTDryRun(FBRouteRequest *request) { NSURLComponents *c = [NSURLCompo
 + (id<FBResponsePayload>)handleResetCellularData:(FBRouteRequest *)request
 {
   BOOL dry = TTDryRun(request); NSDate *s = [NSDate date]; NSError *e; FBSettingsAppNavigator *nav = FBSettingsAppNavigator.sharedInstance;
-  if (![nav launchSettings:&e] || ![nav navigateToPath:@[@"Cellular"] error:&e]) return [self errorResponseWith:e startedAt:s path:@[@"Cellular"] code:kHTTPStatusCodeNotFound];
+  // "com.apple.settings.cellular" is the stable XCUI identifier for the row.
+  // Apple renamed the visible label from "Cellular" to "Mobile Service" on iOS 26;
+  // the identifier substring resolves to the same Button via TTElementFinder's
+  // CONTAINS[c] predicate on identifier (called from navigateToPath:).
+  if (![nav launchSettings:&e] || ![nav navigateToPath:@[@"com.apple.settings.cellular"] error:&e]) return [self errorResponseWith:e startedAt:s path:@[@"com.apple.settings.cellular"] code:kHTTPStatusCodeNotFound];
   if (!dry) { [nav tapButton:@"Reset Statistics" error:&e]; [nav tapButton:@"Reset Statistics" error:nil]; }
   return FBResponseWithObject(@{@"ok": @YES, @"dryRun": @(dry), @"navigatedPath": @[@"Cellular", @"Reset Statistics"], @"durationMs": @(TTSysMs(s))});
 }

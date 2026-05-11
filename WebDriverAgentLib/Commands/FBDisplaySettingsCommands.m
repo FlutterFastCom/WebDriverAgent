@@ -8,6 +8,7 @@
 #import "FBRoute.h"
 #import "FBRouteRequest.h"
 #import "FBSettingsAppNavigator.h"
+#import "TTElementFinder.h"
 #import "XCUIApplication.h"
 #import "XCUIElement.h"
 #import "XCUIElementQuery.h"
@@ -24,14 +25,18 @@
 
 + (NSDictionary *)durationLabelMap
 {
-  // Body string -> iOS Settings.app row label
+  // Body string -> iOS Settings.app row label.
+  // Lowercase labels are the iOS 26 observed form (verified iPhone 14 Pro /
+  // iOS 26.1). TTElementFinder.findRowInApp:byText: matches case-insensitively
+  // via `label CONTAINS[c]` AND `identifier CONTAINS[c]`, so future label
+  // re-capitalization (e.g., "5 Minutes" returns) survives without code change.
   return @{
-    @"30s":   @"30 Seconds",
-    @"1m":    @"1 Minute",
-    @"2m":    @"2 Minutes",
-    @"3m":    @"3 Minutes",
-    @"4m":    @"4 Minutes",
-    @"5m":    @"5 Minutes",
+    @"30s":   @"30 seconds",
+    @"1m":    @"1 minute",
+    @"2m":    @"2 minutes",
+    @"3m":    @"3 minutes",
+    @"4m":    @"4 minutes",
+    @"5m":    @"5 minutes",
     @"never": @"Never",
   };
 }
@@ -101,8 +106,11 @@
     } httpStatusCode:kHTTPStatusCodeConflict];
   }
 
-  // Predicate-find the target duration row
-  XCUIElement *targetRow = [[settings.cells matchingPredicate:[NSPredicate predicateWithFormat:@"label == %@", targetLabel]] firstMatch];
+  // Find the target duration row via TTElementFinder. The helper combines
+  // `label CONTAINS[c]` AND `identifier CONTAINS[c]` and tries Cell-then-Button,
+  // explicitly excluding XCUIElementTypeStaticText (non-interactive children).
+  // This survives both iOS 26's lowercased labels AND future re-capitalization.
+  XCUIElement *targetRow = [TTElementFinder findRowInApp:settings byText:targetLabel];
   if (![targetRow exists]) {
     NSError *notFound = [NSError errorWithDomain:@"FBDisplaySettingsCommands"
                                             code:2

@@ -10,7 +10,7 @@
 #import "FBRouteRequest.h"
 #import "XCUIApplication.h"
 #import "XCUIApplication+FBHelpers.h"
-#import "XCUICoordinate.h"
+#import "XCUIApplication+FBTouchAction.h"
 #import "XCUIElement.h"
 #import "XCUIElementQuery.h"
 static NSInteger TTInputMs(NSDate *s) { return (NSInteger)([[NSDate date] timeIntervalSinceDate:s] * 1000); }
@@ -34,9 +34,107 @@ static NSInteger TTInputMs(NSDate *s) { return (NSInteger)([[NSDate date] timeIn
 }
 + (id<FBResponsePayload>)handleSwipeBezier:(FBRouteRequest *)request
 {
-  NSDictionary *from = request.arguments[@"from"]; NSDictionary *to = request.arguments[@"to"]; NSNumber *dur = request.arguments[@"durationMs"]; if (!from || !to || !dur) return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"from, to, and durationMs are required" traceback:nil]); NSDate *s = [NSDate date]; CGFloat ms = MIN(MAX(dur.doubleValue, 100), 10000); NSUInteger steps = MAX(10u, (NSUInteger)(ms / 1000.0 * 60.0)); NSMutableArray *cps = [NSMutableArray array]; for (NSDictionary *cp in (request.arguments[@"controlPoints"] ?: @[])) [cps addObject:[NSValue valueWithCGPoint:CGPointMake([cp[@"x"] doubleValue], [cp[@"y"] doubleValue])]]; NSArray *path = [FBBezierInterpolator pointsAlongCurveFrom:CGPointMake([from[@"x"] doubleValue], [from[@"y"] doubleValue]) to:CGPointMake([to[@"x"] doubleValue], [to[@"y"] doubleValue]) controlPoints:cps steps:steps]; XCUIApplication *app = XCUIApplication.fb_activeApplication; XCUICoordinate *current = [[app coordinateWithNormalizedOffset:CGVectorMake(0, 0)] coordinateWithOffset:CGVectorMake([from[@"x"] doubleValue], [from[@"y"] doubleValue])];
-  for (NSUInteger i = 1; i < path.count; i++) { CGPoint p = [path[i] CGPointValue]; XCUICoordinate *next = [[app coordinateWithNormalizedOffset:CGVectorMake(0, 0)] coordinateWithOffset:CGVectorMake(p.x, p.y)]; [current pressForDuration:0 thenDragToCoordinate:next withVelocity:0 thenHoldForDuration:(ms / 1000.0) / path.count]; current = next; }
-  FBLogVerbose(@"touch.swipe-bezier steps=%lu cps=%lu durationMs=%ld", (unsigned long)steps, (unsigned long)cps.count, (long)TTInputMs(s)); return FBResponseWithObject(@{@"ok": @YES, @"steps": @(steps), @"controlPointCount": @(cps.count), @"durationMs": @(TTInputMs(s))});
+  NSDictionary *from = request.arguments[@"from"];
+  NSDictionary *to = request.arguments[@"to"];
+  NSNumber *dur = request.arguments[@"durationMs"];
+  if (!from || !to || !dur) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"from, to, and durationMs are required" traceback:nil]);
+  }
+
+  NSDate *startedAt = [NSDate date];
+  CGFloat ms = MIN(MAX(dur.doubleValue, 100), 10000);
+  NSUInteger steps = MAX(10u, (NSUInteger)(ms / 1000.0 * 60.0));
+
+  NSArray *rawCps = request.arguments[@"controlPoints"] ?: @[];
+  if (rawCps.count > 10) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"controlPoints exceeds 10" traceback:nil]);
+  }
+  NSMutableArray *cps = [NSMutableArray array];
+  for (NSDictionary *cp in rawCps) {
+    [cps addObject:[NSValue valueWithCGPoint:CGPointMake([cp[@"x"] doubleValue], [cp[@"y"] doubleValue])]];
+  }
+
+  CGPoint fromPoint = CGPointMake([from[@"x"] doubleValue], [from[@"y"] doubleValue]);
+  CGPoint toPoint = CGPointMake([to[@"x"] doubleValue], [to[@"y"] doubleValue]);
+  NSArray<NSValue *> *path = [FBBezierInterpolator pointsAlongCurveFrom:fromPoint to:toPoint
+                                                          controlPoints:cps steps:steps];
+  // path has (steps + 1) waypoints; first is `from`, last is `to`.
+  if (path.count < 2) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"insufficient path points" traceback:nil]);
+  }
+
+  // Per-move duration. We distribute the full `ms` across (path.count - 1) moves,
+  // since the initial pointerMove-to-start uses duration=0 and the pointerDown +
+  // pointerUp do not consume animation time.
+  CGFloat perMoveMs = ms / (CGFloat)(path.count - 1);
+
+  // Build W3C actions array. Field names match FBW3CActionsSynthesizer constants
+  // (FB_KEY_TYPE, FB_ACTION_ITEM_TYPE_POINTER_*, FB_ACTION_ITEM_KEY_*, etc.).
+  NSMutableArray *actionItems = [NSMutableArray array];
+
+  // (a) Move pointer to start position. duration=0 = instant (no animation).
+  CGPoint startPoint = [path[0] CGPointValue];
+  [actionItems addObject:@{
+    @"type": @"pointerMove",
+    @"x": @(startPoint.x),
+    @"y": @(startPoint.y),
+    @"origin": @"viewport",
+    @"duration": @(0),
+  }];
+
+  // (b) Begin contact. button=0 = primary touch.
+  [actionItems addObject:@{
+    @"type": @"pointerDown",
+    @"button": @(0),
+  }];
+
+  // (c) Drag through every waypoint after the first. Each move has duration=perMoveMs.
+  for (NSUInteger i = 1; i < path.count; i++) {
+    CGPoint p = [path[i] CGPointValue];
+    [actionItems addObject:@{
+      @"type": @"pointerMove",
+      @"x": @(p.x),
+      @"y": @(p.y),
+      @"origin": @"viewport",
+      @"duration": @(perMoveMs),
+    }];
+  }
+
+  // (d) End contact.
+  [actionItems addObject:@{
+    @"type": @"pointerUp",
+    @"button": @(0),
+  }];
+
+  NSArray *w3cActions = @[
+    @{
+      @"type": @"pointer",
+      @"id": @"swipe-bezier",
+      @"parameters": @{@"pointerType": @"touch"},
+      @"actions": actionItems,
+    }
+  ];
+
+  XCUIApplication *app = XCUIApplication.fb_activeApplication;
+  NSError *synthError = nil;
+  BOOL ok = [app fb_performW3CActions:w3cActions elementCache:nil error:&synthError];
+  NSInteger durationMs = TTInputMs(startedAt);
+
+  if (!ok) {
+    FBLogWarn(@"touch.swipe-bezier synth_failed reason=%@", synthError.localizedDescription);
+    return [[FBResponseJSONPayload alloc]
+            initWithDictionary:@{@"error": @"gesture_failed",
+                                 @"message": synthError.localizedDescription ?: @"unknown",
+                                 @"durationMs": @(durationMs)}
+            httpStatusCode:kHTTPStatusCodeInternalServerError];
+  }
+
+  FBLogVerbose(@"touch.swipe-bezier steps=%lu cps=%lu durationMs=%ld",
+               (unsigned long)steps, (unsigned long)cps.count, (long)durationMs);
+  return FBResponseWithObject(@{@"ok": @YES,
+                                @"steps": @(steps),
+                                @"controlPointCount": @(cps.count),
+                                @"durationMs": @(durationMs)});
 }
 + (id<FBResponsePayload>)handleClearField:(FBRouteRequest *)request
 {

@@ -92,6 +92,73 @@ static NSString *FBQueryParam(FBRouteRequest *request, NSString *name)
   return nil;
 }
 
+// Allowlist of top-level keypaths that XCElementSnapshot is KVC-compliant for.
+// `name` is intentionally EXCLUDED -- the /source JSON `name` field is a synthetic
+// presentation alias for `identifier`; using it in NSPredicate against the live
+// snapshot throws NSUndefinedKeyException.
+static NSSet<NSString *> *FBTapPredicateSupportedKeys(void)
+{
+  static NSSet *keys;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    keys = [NSSet setWithArray:@[
+      @"label",
+      @"value",
+      @"title",
+      @"placeholderValue",
+      @"identifier",
+    ]];
+  });
+  return keys;
+}
+
+// Validate that every keypath used in `predicate` is in the allowlist AND is a
+// single (non-dotted) token. Returns nil on success, or a structured error dict
+// on failure that the caller wraps in a 400 response.
+//
+// Implementation: walk the NSPredicate AST. NSPredicate decomposes to
+// NSComparisonPredicate (leaf) and NSCompoundPredicate (AND/OR/NOT). Each leaf
+// has leftExpression / rightExpression -- we inspect leftExpression.keyPath when
+// the expression type is NSKeyPathExpressionType.
+static NSDictionary *FBTapPredicateValidationError(NSPredicate *predicate)
+{
+  NSSet *allowed = FBTapPredicateSupportedKeys();
+  NSMutableArray *bad = [NSMutableArray array];
+  __block void (^walk)(NSPredicate *);
+  walk = ^(NSPredicate *p) {
+    if ([p isKindOfClass:[NSCompoundPredicate class]]) {
+      for (NSPredicate *sub in ((NSCompoundPredicate *)p).subpredicates) {
+        walk(sub);
+      }
+      return;
+    }
+    if (![p isKindOfClass:[NSComparisonPredicate class]]) { return; }
+    NSComparisonPredicate *c = (NSComparisonPredicate *)p;
+    for (NSExpression *expr in @[c.leftExpression, c.rightExpression]) {
+      if (expr.expressionType != NSKeyPathExpressionType) { continue; }
+      NSString *kp = expr.keyPath;
+      // Reject nested keypaths outright (e.g., "children.label").
+      // XCElementSnapshot doesn't expose nested KVC keypaths usable via predicate.
+      if ([kp containsString:@"."]) {
+        [bad addObject:kp];
+        continue;
+      }
+      if (![allowed containsObject:kp]) {
+        [bad addObject:kp];
+      }
+    }
+  };
+  walk(predicate);
+  if (bad.count == 0) { return nil; }
+  return @{
+    @"error": @"unsupported_predicate_key",
+    @"got": [bad firstObject] ?: @"(unknown)",
+    @"allUnsupported": [bad copy],
+    @"supported": [allowed.allObjects sortedArrayUsingSelector:@selector(compare:)],
+    @"hint": @"XCElementSnapshot exposes only these KVC keys. The /source JSON `name` field is a synthetic presentation alias for `identifier` -- use `identifier` in predicates. Nested keypaths (e.g., `children.label`) are not supported."
+  };
+}
+
 @implementation FBPerfCommands
 
 + (NSArray *)routes
@@ -109,9 +176,11 @@ static NSString *FBQueryParam(FBRouteRequest *request, NSString *name)
     /**
      * HTTP verb: GET
      * path: /wda/source/per-app
-     * request schema: query { bundleId: string }
-     * response schema: { value: object, durationMs: number }
-     * error codes: 400 missing bundleId, 500 on snapshot failure
+     * request schema: query { bundleId: string, budget_ms?: number, force?: "1"|"true"|"yes" }
+     * response schema (200): { value: object, walkedNodeCount: number, partial: boolean, durationMs: number, budgetMs: number }
+     * response schema (404 app_not_running): { error: "app_not_running", bundleId, durationMs }
+     * response schema (400 target_not_foreground): { error: "target_not_foreground", requestedBundleId, foregroundBundleId, message, durationMs }
+     * error codes: 400 missing bundleId, 404 app_not_running, 400 target_not_foreground
      * capability token: source.per-app
      */
     [[FBRoute GET:@"/wda/source/per-app"].withoutSession respondWithTarget:self action:@selector(handleSourcePerApp:)],
@@ -120,7 +189,7 @@ static NSString *FBQueryParam(FBRouteRequest *request, NSString *name)
      * path: /wda/tap-by-predicate
      * request schema: { predicate: string, why?: string }
      * response schema: { tapped: true, durationMs: number }
-     * error codes: 400 invalid predicate, 404 no match, 500 tap failure
+     * error codes: 400 invalid predicate, 400 unsupported_predicate_key, 404 no match, 500 tap failure
      * capability token: tap.predicate
      */
     [[FBRoute POST:@"/wda/tap-by-predicate"].withoutSession respondWithTarget:self action:@selector(handleTapByPredicate:)],
@@ -167,13 +236,59 @@ static NSString *FBQueryParam(FBRouteRequest *request, NSString *name)
   if (0 == bundleId.length) {
     return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"bundleId is required" traceback:nil]);
   }
+
+  // Budget — default 5 s if caller didn't specify, capped at 30 s.
+  NSInteger budgetMs = [FBQueryParam(request, @"budget_ms") integerValue];
+  if (budgetMs <= 0) { budgetMs = 5000; }
+  if (budgetMs > 30000) { budgetMs = 30000; }
+
   NSDate *startedAt = [NSDate date];
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:budgetMs / 1000.0];
+
   XCUIApplication *app = [[XCUIApplication alloc] initWithBundleIdentifier:bundleId];
+
+  // Fail fast if the target app isn't on the device / not running.
+  if (![app exists]) {
+    return [[FBResponseJSONPayload alloc]
+            initWithDictionary:@{@"error": @"app_not_running",
+                                 @"bundleId": bundleId,
+                                 @"durationMs": @(FBDurationMsSince(startedAt))}
+            httpStatusCode:kHTTPStatusCodeNotFound];
+  }
+
+  // Default behavior: refuse to walk a non-foreground app's tree unless caller
+  // explicitly opts in with ?force=true. Cross-process accessibility queries
+  // are extremely slow on iOS 26 and risk wedging the WDA route queue.
+  NSString *forceParam = FBQueryParam(request, @"force");
+  BOOL force = forceParam.length > 0 && [@[@"1", @"true", @"yes"] containsObject:forceParam.lowercaseString];
+  if (!force) {
+    // Use FBForegroundTracker.sharedInstance.currentBundleId — already cached in this file's
+    // existing handleForegroundCached: pattern. Reliable, locale-stable, no XPC roundtrip.
+    NSString *fgBundleId = FBForegroundTracker.sharedInstance.currentBundleId;
+    if (fgBundleId && ![fgBundleId isEqualToString:bundleId]) {
+      return [[FBResponseJSONPayload alloc]
+              initWithDictionary:@{@"error": @"target_not_foreground",
+                                   @"message": @"target app is not foregrounded; pass ?force=true to walk anyway (slow + risky on iOS 26.1)",
+                                   @"requestedBundleId": bundleId,
+                                   @"foregroundBundleId": fgBundleId,
+                                   @"durationMs": @(FBDurationMsSince(startedAt))}
+              httpStatusCode:kHTTPStatusCodeBadRequest];
+    }
+  }
+
   NSUInteger walked = 0;
-  NSDictionary *tree = FBSnapshotDictionary(app, nil, 0, &walked, NULL);
+  BOOL partial = NO;
+  NSDictionary *tree = FBSnapshotDictionary(app, deadline, 0, &walked, &partial);
   NSInteger durationMs = FBDurationMsSince(startedAt);
-  FBLogVerbose(@"source.per-app bundleId=%@ walked=%lu durationMs=%ld", bundleId, (unsigned long)walked, (long)durationMs);
-  return FBResponseWithObject(@{@"value": tree ?: @{}, @"walkedNodeCount": @(walked), @"durationMs": @(durationMs)});
+
+  FBLogVerbose(@"source.per-app bundleId=%@ walked=%lu partial=%d durationMs=%ld",
+               bundleId, (unsigned long)walked, partial, (long)durationMs);
+
+  return FBResponseWithObject(@{@"value": tree ?: @{},
+                                @"walkedNodeCount": @(walked),
+                                @"partial": @(partial),
+                                @"durationMs": @(durationMs),
+                                @"budgetMs": @(budgetMs)});
 }
 
 + (id<FBResponsePayload>)handleTapByPredicate:(FBRouteRequest *)request
@@ -183,20 +298,63 @@ static NSString *FBQueryParam(FBRouteRequest *request, NSString *name)
   if (0 == predicateString.length) {
     return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"predicate is required" traceback:nil]);
   }
+
   NSPredicate *predicate;
   @try {
     predicate = [NSPredicate predicateWithFormat:predicateString];
   } @catch (NSException *exception) {
-    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:[NSString stringWithFormat:@"invalid predicate: %@", exception.reason] traceback:nil]);
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:
+                                 [NSString stringWithFormat:@"invalid predicate: %@", exception.reason]
+                                 traceback:nil]);
   }
+
+  // Allowlist gate. Reject unsupported keys BEFORE attempting to evaluate the
+  // predicate against XCElementSnapshot (which would throw NSUndefinedKeyException
+  // and bubble up as a 500 with a framework traceback).
+  NSDictionary *validationError = FBTapPredicateValidationError(predicate);
+  if (validationError) {
+    return [[FBResponseJSONPayload alloc]
+            initWithDictionary:validationError
+            httpStatusCode:kHTTPStatusCodeBadRequest];
+  }
+
   NSDate *startedAt = [NSDate date];
-  XCUIElement *element = [[XCUIApplication.fb_activeApplication descendantsMatchingType:XCUIElementTypeAny] elementMatchingPredicate:predicate];
+  XCUIElement *element;
+  @try {
+    // Defense in depth: even after the allowlist gate, certain edge cases (future
+    // iOS versions, exotic operator combinations) could still throw at evaluation
+    // time. Catch them here rather than letting them bubble to a 500.
+    element = [[XCUIApplication.fb_activeApplication descendantsMatchingType:XCUIElementTypeAny]
+               elementMatchingPredicate:predicate];
+  } @catch (NSException *exception) {
+    FBLogWarn(@"tap.predicate evaluation_failed reason=%@", exception.reason);
+    return [[FBResponseJSONPayload alloc]
+            initWithDictionary:@{@"error": @"predicate_evaluation_failed",
+                                 @"message": exception.reason ?: @"unknown",
+                                 @"supported": [FBTapPredicateSupportedKeys().allObjects sortedArrayUsingSelector:@selector(compare:)],
+                                 @"hint": @"The predicate parsed but failed to evaluate. This indicates the allowlist gate missed a case; please report."}
+            httpStatusCode:kHTTPStatusCodeBadRequest];
+  }
+
   if (![element exists]) {
     NSInteger durationMs = FBDurationMsSince(startedAt);
     FBLogVerbose(@"tap.predicate no_match why=%@ durationMs=%ld", why ?: @"-", (long)durationMs);
-    return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"error": @"no_match", @"durationMs": @(durationMs)} httpStatusCode:kHTTPStatusCodeNotFound];
+    return [[FBResponseJSONPayload alloc]
+            initWithDictionary:@{@"error": @"no_match", @"durationMs": @(durationMs)}
+            httpStatusCode:kHTTPStatusCodeNotFound];
   }
-  [element tap];
+
+  // Tap can also throw (element disappeared between match and tap). Guard it too.
+  @try {
+    [element tap];
+  } @catch (NSException *exception) {
+    return [[FBResponseJSONPayload alloc]
+            initWithDictionary:@{@"error": @"tap_failed",
+                                 @"message": exception.reason ?: @"unknown",
+                                 @"durationMs": @(FBDurationMsSince(startedAt))}
+            httpStatusCode:kHTTPStatusCodeInternalServerError];
+  }
+
   NSInteger durationMs = FBDurationMsSince(startedAt);
   FBLogVerbose(@"tap.predicate tapped why=%@ durationMs=%ld", why ?: @"-", (long)durationMs);
   return FBResponseWithObject(@{@"tapped": @YES, @"durationMs": @(durationMs)});
