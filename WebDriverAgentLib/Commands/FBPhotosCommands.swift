@@ -117,7 +117,8 @@ private extension FBPhotosCommands {
           let mediaType = FBPhotoMediaType(rawString: rawMediaType) else {
       return nil
     }
-    return FBPhotoImportItem(data: data, byteCount: data.count, mediaType: mediaType)
+    let uti = arguments["uti"] as? String
+    return FBPhotoImportItem(data: data, byteCount: data.count, mediaType: mediaType, uti: uti)
   }
 
   static func importItem(_ item: FBPhotoImportItem, completion: @escaping Completion) {
@@ -146,7 +147,9 @@ private extension FBPhotosCommands {
       try PHPhotoLibrary.shared().performChangesAndWait {
         identifiers = items.compactMap { item in
           let request = PHAssetCreationRequest.forAsset()
-          request.addResource(with: item.mediaType.assetResourceType, data: item.data, options: nil)
+          let options = PHAssetResourceCreationOptions()
+          options.uniformTypeIdentifier = item.uti ?? Self.defaultUti(for: item.mediaType)
+          request.addResource(with: item.mediaType.assetResourceType, data: item.data, options: options)
           return request.placeholderForCreatedAsset?.localIdentifier
         }
       }
@@ -191,6 +194,13 @@ private extension FBPhotosCommands {
 
   static func durationMs(since startedAt: Date) -> Int {
     return Int(Date().timeIntervalSince(startedAt) * 1000)
+  }
+
+  static func defaultUti(for mediaType: FBPhotoMediaType) -> String {
+    switch mediaType {
+    case .image: return "public.jpeg"
+    case .video: return "public.mpeg-4"
+    }
   }
 }
 #endif

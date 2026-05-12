@@ -42,6 +42,7 @@ struct FBPhotoImportItem {
   let data: Data
   let byteCount: Int
   let mediaType: FBPhotoMediaType
+  let uti: String?
 }
 
 enum FBPhotosCommandError: LocalizedError {
