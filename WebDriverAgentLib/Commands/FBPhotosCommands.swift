@@ -142,14 +142,42 @@ private extension FBPhotosCommands {
       return
     }
 
+    // Write each item to a temp file with extension matching mediaType. iOS
+    // PhotoKit's addResource(with:data:options:) returns PHPhotosErrorDomain
+    // 3300 for video resources regardless of uniformTypeIdentifier; the
+    // fileURL form is the documented stable path. See Apple Dev Forums
+    // thread 708318 — chronic since iOS 15. options.shouldMoveFile=false
+    // keeps the file in place so we own cleanup in defer.
+    let tempURLs: [URL] = items.map { item in
+      let ext = Self.fileExtension(for: item.mediaType)
+      return URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("\(UUID().uuidString).\(ext)")
+    }
+
+    defer {
+      for url in tempURLs {
+        try? FileManager.default.removeItem(at: url)
+      }
+    }
+
+    do {
+      for (item, url) in zip(items, tempURLs) {
+        try item.data.write(to: url)
+      }
+    } catch {
+      completion(nil, error)
+      return
+    }
+
     do {
       var identifiers: [String] = []
       try PHPhotoLibrary.shared().performChangesAndWait {
-        identifiers = items.compactMap { item in
+        identifiers = zip(items, tempURLs).compactMap { (item, tempURL) -> String? in
           let request = PHAssetCreationRequest.forAsset()
           let options = PHAssetResourceCreationOptions()
           options.uniformTypeIdentifier = item.uti ?? Self.defaultUti(for: item.mediaType)
-          request.addResource(with: item.mediaType.assetResourceType, data: item.data, options: options)
+          options.shouldMoveFile = false
+          request.addResource(with: item.mediaType.assetResourceType, fileURL: tempURL, options: options)
           return request.placeholderForCreatedAsset?.localIdentifier
         }
       }
@@ -200,6 +228,13 @@ private extension FBPhotosCommands {
     switch mediaType {
     case .image: return "public.jpeg"
     case .video: return "public.mpeg-4"
+    }
+  }
+
+  static func fileExtension(for mediaType: FBPhotoMediaType) -> String {
+    switch mediaType {
+    case .image: return "jpg"
+    case .video: return "mp4"
     }
   }
 }
