@@ -14,6 +14,131 @@
 #import "XCUIElement.h"
 #import "XCUIElementQuery.h"
 static NSInteger TTInputMs(NSDate *s) { return (NSInteger)([[NSDate date] timeIntervalSinceDate:s] * 1000); }
+static const NSTimeInterval TTClearHoldBase = 2.5;  // floor hold; clears short fields (proven: 2.5s cleared 7 chars)
+static const NSTimeInterval TTClearHoldPerChar = 0.03; // linear add per estimated char (conservative vs accel-delete)
+static const NSTimeInterval TTClearHoldMax = 8.0;   // cap — stays well under the 15s WDA HTTP timeout
+static const NSTimeInterval TTClearHoldBlind = 5.5; // hold when no length estimate is supplied
+static NSString *TTElementDebugName(XCUIElement *element);
+static BOOL TTElementIsInsideKeyboard(XCUIElement *element, CGRect keyboardFrame);
+static XCUIElement *TTFirstExistingElement(XCUIElementQuery *query, NSTimeInterval timeout);
+static XCUIElement *TTFindDeleteKeyByAX(XCUIApplication *app, XCUIElement *keyboard, NSString **strategy);
+static BOOL TTPressKeyboardDeleteCoordinateFallback(XCUIElement *keyboard, NSTimeInterval hold, NSString **strategy);
+
+static NSString *TTElementDebugName(XCUIElement *element)
+{
+  NSString *identifier = element.identifier;
+  NSString *label = element.label;
+  id value = element.value;
+  return [NSString stringWithFormat:@"identifier=%@ label=%@ value=%@ frame=%@ hittable=%@",
+          identifier.length ? identifier : @"(none)",
+          label.length ? label : @"(none)",
+          nil != value ? value : @"(none)",
+          NSStringFromCGRect(element.frame),
+          element.hittable ? @"YES" : @"NO"];
+}
+
+static BOOL TTElementIsInsideKeyboard(XCUIElement *element, CGRect keyboardFrame)
+{
+  if (CGRectIsNull(keyboardFrame) || CGRectIsEmpty(keyboardFrame)) {
+    return YES;
+  }
+  CGRect elementFrame = element.frame;
+  if (CGRectIsNull(elementFrame) || CGRectIsEmpty(elementFrame)) {
+    return NO;
+  }
+  return CGRectContainsRect(CGRectInset(keyboardFrame, -1.0, -1.0), elementFrame)
+    || CGRectIntersectsRect(keyboardFrame, elementFrame);
+}
+
+static XCUIElement *TTFirstExistingElement(XCUIElementQuery *query, NSTimeInterval timeout)
+{
+  XCUIElement *element = [query firstMatch];
+  return [element waitForExistenceWithTimeout:timeout] ? element : nil;
+}
+
+static XCUIElement *TTFirstDeleteCandidate(XCUIElementQuery *query, CGRect keyboardFrame)
+{
+  (void)TTFirstExistingElement(query, 0.1);
+  XCUIElement *fallback = nil;
+  for (XCUIElement *candidate in query.allElementsBoundByIndex) {
+    if (![candidate exists] || !TTElementIsInsideKeyboard(candidate, keyboardFrame)) {
+      continue;
+    }
+    if (candidate.hittable) {
+      return candidate;
+    }
+    if (nil == fallback) {
+      fallback = candidate;
+    }
+  }
+  return fallback;
+}
+
+static XCUIElement *TTFindDeleteKeyByAX(XCUIApplication *app, XCUIElement *keyboard, NSString **strategy)
+{
+  CGRect keyboardFrame = keyboard.frame;
+  XCUIElement *exact = app.keys[@"delete"];
+  if ([exact waitForExistenceWithTimeout:1.0] && TTElementIsInsideKeyboard(exact, keyboardFrame)) {
+    if (nil != strategy) {
+      *strategy = @"ax-exact";
+    }
+    FBLogVerbose(@"keyboard.clear-field-no-a11y ax candidate strategy=ax-exact %@", TTElementDebugName(exact));
+    return exact;
+  }
+
+  NSPredicate *deletePredicate = [NSPredicate predicateWithFormat:@"identifier CONTAINS[c] %@ OR label CONTAINS[c] %@ OR name CONTAINS[c] %@ OR identifier CONTAINS[c] %@ OR label CONTAINS[c] %@ OR name CONTAINS[c] %@", @"delete", @"delete", @"delete", @"backspace", @"backspace", @"backspace"];
+  XCUIElement *keyCandidate = TTFirstDeleteCandidate([app.keys matchingPredicate:deletePredicate], keyboardFrame);
+  if (nil != keyCandidate) {
+    if (nil != strategy) {
+      *strategy = @"ax-key-predicate";
+    }
+    FBLogVerbose(@"keyboard.clear-field-no-a11y ax candidate strategy=ax-key-predicate %@", TTElementDebugName(keyCandidate));
+    return keyCandidate;
+  }
+
+  XCUIElement *buttonCandidate = TTFirstDeleteCandidate([app.buttons matchingPredicate:deletePredicate], keyboardFrame);
+  if (nil != buttonCandidate) {
+    if (nil != strategy) {
+      *strategy = @"ax-button-predicate";
+    }
+    FBLogVerbose(@"keyboard.clear-field-no-a11y ax candidate strategy=ax-button-predicate %@", TTElementDebugName(buttonCandidate));
+    return buttonCandidate;
+  }
+
+  return nil;
+}
+
+static BOOL TTPressKeyboardDeleteCoordinateFallback(XCUIElement *keyboard, NSTimeInterval hold, NSString **strategy)
+{
+  if (CGRectIsNull(keyboard.frame) || CGRectIsEmpty(keyboard.frame)) {
+    return NO;
+  }
+  NSArray<NSValue *> *offsets = @[
+    [NSValue valueWithCGVector:CGVectorMake(0.92, 0.58)],
+    [NSValue valueWithCGVector:CGVectorMake(0.92, 0.46)],
+    [NSValue valueWithCGVector:CGVectorMake(0.92, 0.30)],
+  ];
+  NSException *lastException = nil;
+  for (NSValue *offset in offsets) {
+    CGVector vector = offset.CGVectorValue;
+    @try {
+      XCUICoordinate *coordinate = [keyboard coordinateWithNormalizedOffset:vector];
+      [coordinate pressForDuration:hold];
+      if (nil != strategy) {
+        *strategy = [NSString stringWithFormat:@"coordinate-fallback:%.2f,%.2f", vector.dx, vector.dy];
+      }
+      return YES;
+    } @catch (NSException *e) {
+      lastException = e;
+      FBLogWarn(@"keyboard.clear-field-no-a11y coordinate fallback threw x=%.2f y=%.2f reason=%@", vector.dx, vector.dy, e.reason);
+    }
+  }
+  if (nil != lastException) {
+    @throw lastException;
+  }
+  return NO;
+}
+
 @implementation FBInputCommands
 + (NSArray *)routes
 {
@@ -24,6 +149,8 @@ static NSInteger TTInputMs(NSDate *s) { return (NSInteger)([[NSDate date] timeIn
     [[FBRoute POST:@"/wda/touch/swipe-bezier"].withoutSession respondWithTarget:self action:@selector(handleSwipeBezier:)],
     /** HTTP verb: POST; path: /wda/keyboard/clear-field; request schema: none; response schema: {ok,durationMs}; error codes: 404/500; capability token: keyboard.clear-field */
     [[FBRoute POST:@"/wda/keyboard/clear-field"].withoutSession respondWithTarget:self action:@selector(handleClearField:)],
+    /** HTTP verb: POST; path: /wda/keyboard/clear-field-no-a11y; request schema: {approxChars?:number}; response schema: {ok,holdSeconds,durationMs}; error codes: 404/500; capability token: keyboard.clear-field-no-a11y */
+    [[FBRoute POST:@"/wda/keyboard/clear-field-no-a11y"].withoutSession respondWithTarget:self action:@selector(handleClearFieldNoA11y:)],
   ];
 }
 + (id<FBResponsePayload>)handleTypeWithDelay:(FBRouteRequest *)request
@@ -139,5 +266,37 @@ static NSInteger TTInputMs(NSDate *s) { return (NSInteger)([[NSDate date] timeIn
 + (id<FBResponsePayload>)handleClearField:(FBRouteRequest *)request
 {
   NSDate *s = [NSDate date]; XCUIApplication *app = XCUIApplication.fb_activeApplication; XCUIElement *field = [[app.textFields firstMatch] exists] ? [app.textFields firstMatch] : ([[app.textViews firstMatch] exists] ? [app.textViews firstMatch] : [app.secureTextFields firstMatch]); if (![field exists]) return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"ok": @NO, @"error": @"no_focused_field", @"durationMs": @(TTInputMs(s))} httpStatusCode:kHTTPStatusCodeNotFound]; [field pressForDuration:1.0]; [NSThread sleepForTimeInterval:0.4]; XCUIElement *selectAll = [[app.menuItems matchingPredicate:[NSPredicate predicateWithFormat:@"label IN {'Select All', 'select all'}"]] firstMatch]; if ([selectAll exists]) [selectAll tap]; else [field typeKey:@"a" modifierFlags:XCUIKeyModifierCommand]; [NSThread sleepForTimeInterval:0.2]; [field typeKey:XCUIKeyboardKeyDelete modifierFlags:0]; FBLogVerbose(@"keyboard.clear-field durationMs=%ld", (long)TTInputMs(s)); return FBResponseWithObject(@{@"ok": @YES, @"durationMs": @(TTInputMs(s))});
+}
++ (id<FBResponsePayload>)handleClearFieldNoA11y:(FBRouteRequest *)request
+{
+  // Press-and-hold the on-screen keyboard delete control for the already-focused
+  // field. TikTok Bio can hide the key from exact AX lookup, so keep AX first and
+  // fall back to keyboard-relative coordinates instead of window typeKey.
+  NSDate *s = [NSDate date];
+  NSNumber *approx = request.arguments[@"approxChars"];
+  NSTimeInterval hold = approx
+    ? MIN(MAX(TTClearHoldBase + approx.doubleValue * TTClearHoldPerChar, TTClearHoldBase), TTClearHoldMax)
+    : TTClearHoldBlind;
+  XCUIElement *keyboard = [XCUIApplication.fb_activeApplication.keyboards firstMatch];
+  if (![keyboard exists]) {
+    FBLogWarn(@"keyboard.clear-field-no-a11y no keyboard on screen");
+    return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"ok": @NO, @"error": @"no_keyboard", @"durationMs": @(TTInputMs(s))} httpStatusCode:kHTTPStatusCodeNotFound];
+  }
+  XCUIApplication *app = XCUIApplication.fb_activeApplication;
+  NSString *strategy = nil;
+  XCUIElement *deleteKey = TTFindDeleteKeyByAX(app, keyboard, &strategy);
+  @try {
+    if (nil != deleteKey) {
+      [deleteKey pressForDuration:hold];
+    } else if (!TTPressKeyboardDeleteCoordinateFallback(keyboard, hold, &strategy)) {
+      FBLogWarn(@"keyboard.clear-field-no-a11y delete key not found after AX and coordinate fallback keyboardFrame=%@", NSStringFromCGRect(keyboard.frame));
+      return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"ok": @NO, @"error": @"no_delete_key", @"durationMs": @(TTInputMs(s))} httpStatusCode:kHTTPStatusCodeNotFound];
+    }
+  } @catch (NSException *e) {
+    FBLogWarn(@"keyboard.clear-field-no-a11y press failed strategy=%@ hold=%.2f reason=%@", strategy ?: @"(none)", hold, e.reason);
+    return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"ok": @NO, @"error": @"press_threw", @"durationMs": @(TTInputMs(s))} httpStatusCode:kHTTPStatusCodeInternalServerError];
+  }
+  FBLogVerbose(@"keyboard.clear-field-no-a11y strategy=%@ holdSeconds=%.2f approxChars=%@ durationMs=%ld", strategy ?: @"(none)", hold, approx ?: @"(blind)", (long)TTInputMs(s));
+  return FBResponseWithObject(@{@"ok": @YES, @"holdSeconds": @(hold), @"durationMs": @(TTInputMs(s))});
 }
 @end
