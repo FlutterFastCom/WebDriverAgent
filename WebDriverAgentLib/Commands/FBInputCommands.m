@@ -21,8 +21,10 @@ static const NSTimeInterval TTClearHoldBlind = 5.5; // hold when no length estim
 static NSString *TTElementDebugName(XCUIElement *element);
 static BOOL TTElementIsInsideKeyboard(XCUIElement *element, CGRect keyboardFrame);
 static XCUIElement *TTFirstExistingElement(XCUIElementQuery *query, NSTimeInterval timeout);
+static BOOL TTKeyboardIndicatorsExist(XCUIApplication *app);
 static XCUIElement *TTFindDeleteKeyByAX(XCUIApplication *app, XCUIElement *keyboard, NSString **strategy);
 static BOOL TTPressKeyboardDeleteCoordinateFallback(XCUIElement *keyboard, NSTimeInterval hold, NSString **strategy);
+static BOOL TTPressThirdPartyDeleteCoordinateFallback(XCUIApplication *app, NSTimeInterval hold, NSString **strategy, NSString **failureReason);
 
 static NSString *TTElementDebugName(XCUIElement *element)
 {
@@ -72,6 +74,16 @@ static XCUIElement *TTFirstDeleteCandidate(XCUIElementQuery *query, CGRect keybo
     }
   }
   return fallback;
+}
+
+static BOOL TTKeyboardIndicatorsExist(XCUIApplication *app)
+{
+  XCUIElement *nextKeyboard = app.buttons[@"Next keyboard"];
+  if ([nextKeyboard waitForExistenceWithTimeout:0.1]) {
+    return YES;
+  }
+  XCUIElement *dictation = app.buttons[@"dictation"];
+  return [dictation waitForExistenceWithTimeout:0.1];
 }
 
 static XCUIElement *TTFindDeleteKeyByAX(XCUIApplication *app, XCUIElement *keyboard, NSString **strategy)
@@ -137,6 +149,36 @@ static BOOL TTPressKeyboardDeleteCoordinateFallback(XCUIElement *keyboard, NSTim
     @throw lastException;
   }
   return NO;
+}
+
+static BOOL TTPressThirdPartyDeleteCoordinateFallback(XCUIApplication *app, NSTimeInterval hold, NSString **strategy, NSString **failureReason)
+{
+  XCUIElement *target = [app.windows firstMatch];
+  if (![target exists]) {
+    target = app;
+  }
+
+  if (![target exists]) {
+    if (nil != failureReason) {
+      *failureReason = @"target_missing";
+    }
+    return NO;
+  }
+
+  @try {
+    XCUICoordinate *coordinate = [target coordinateWithNormalizedOffset:CGVectorMake(0.935, 0.815)];
+    [coordinate pressForDuration:hold];
+    if (nil != strategy) {
+      *strategy = [NSString stringWithFormat:@"third-party-coordinate-hold:0.94,0.82:%.2f", hold];
+    }
+    return YES;
+  } @catch (NSException *e) {
+    FBLogWarn(@"keyboard.clear-field-no-a11y third-party coordinate fallback threw hold=%.2f reason=%@", hold, e.reason);
+    if (nil != failureReason) {
+      *failureReason = e.reason ?: @"coordinate_press_threw";
+    }
+    return NO;
+  }
 }
 
 @implementation FBInputCommands
@@ -277,13 +319,28 @@ static BOOL TTPressKeyboardDeleteCoordinateFallback(XCUIElement *keyboard, NSTim
   NSTimeInterval hold = approx
     ? MIN(MAX(TTClearHoldBase + approx.doubleValue * TTClearHoldPerChar, TTClearHoldBase), TTClearHoldMax)
     : TTClearHoldBlind;
-  XCUIElement *keyboard = [XCUIApplication.fb_activeApplication.keyboards firstMatch];
-  if (![keyboard exists]) {
+  XCUIApplication *app = XCUIApplication.fb_activeApplication;
+  XCUIElement *keyboard = [app.keyboards firstMatch];
+  if (nil == keyboard || ![keyboard exists]) {
+    NSString *strategy = nil;
+    if (TTKeyboardIndicatorsExist(app)) {
+      NSString *failureReason = nil;
+      if (TTPressThirdPartyDeleteCoordinateFallback(app, hold, &strategy, &failureReason)) {
+        FBLogVerbose(@"keyboard.clear-field-no-a11y strategy=%@ holdSeconds=%.2f approxChars=%@ durationMs=%ld", strategy ?: @"(none)", hold, approx ?: @"(blind)", (long)TTInputMs(s));
+        return FBResponseWithObject(@{@"ok": @YES, @"holdSeconds": @(hold), @"durationMs": @(TTInputMs(s))});
+      }
+      FBLogWarn(@"keyboard.clear-field-no-a11y third-party delete coordinate failed reason=%@", failureReason ?: @"unknown");
+      BOOL didThrow = nil != failureReason && ![failureReason isEqualToString:@"target_missing"];
+      return [[FBResponseJSONPayload alloc]
+              initWithDictionary:@{@"ok": @NO,
+                                   @"error": didThrow ? @"press_threw" : @"no_delete_key",
+                                   @"durationMs": @(TTInputMs(s))}
+              httpStatusCode:didThrow ? kHTTPStatusCodeInternalServerError : kHTTPStatusCodeNotFound];
+    }
     FBLogWarn(@"keyboard.clear-field-no-a11y no keyboard on screen");
     return [[FBResponseJSONPayload alloc] initWithDictionary:@{@"ok": @NO, @"error": @"no_keyboard", @"durationMs": @(TTInputMs(s))} httpStatusCode:kHTTPStatusCodeNotFound];
   }
-  XCUIApplication *app = XCUIApplication.fb_activeApplication;
-  NSString *strategy = nil;
+  NSString *strategy = @"xcui-keyboard";
   XCUIElement *deleteKey = TTFindDeleteKeyByAX(app, keyboard, &strategy);
   @try {
     if (nil != deleteKey) {
