@@ -98,7 +98,7 @@ static XCUIElement *TTFindDeleteKeyByAX(XCUIApplication *app, XCUIElement *keybo
     return exact;
   }
 
-  NSPredicate *deletePredicate = [NSPredicate predicateWithFormat:@"identifier CONTAINS[c] %@ OR label CONTAINS[c] %@ OR name CONTAINS[c] %@ OR identifier CONTAINS[c] %@ OR label CONTAINS[c] %@ OR name CONTAINS[c] %@", @"delete", @"delete", @"delete", @"backspace", @"backspace", @"backspace"];
+  NSPredicate *deletePredicate = [NSPredicate predicateWithFormat:@"identifier CONTAINS[c] %@ OR label CONTAINS[c] %@ OR identifier CONTAINS[c] %@ OR label CONTAINS[c] %@", @"delete", @"delete", @"backspace", @"backspace"];
   XCUIElement *keyCandidate = TTFirstDeleteCandidate([app.keys matchingPredicate:deletePredicate], keyboardFrame);
   if (nil != keyCandidate) {
     if (nil != strategy) {
