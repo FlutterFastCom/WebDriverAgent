@@ -87,6 +87,30 @@ enum FBPhotoResponseFactory {
     ]
   }
 
+  static func exactList(assets: [NSDictionary], snapshot: FBExactPhotoSnapshot) -> NSDictionary {
+    return [
+      "assets": assets,
+      "snapshot": snapshotValue(
+        libraryInstanceId: snapshot.libraryInstanceId,
+        changeSequence: snapshot.changeSequence,
+        totalCount: snapshot.totalCount
+      ),
+    ]
+  }
+
+  static func snapshotValue(
+    libraryInstanceId: UUID,
+    changeSequence: UInt64,
+    totalCount: Int
+  ) -> NSDictionary {
+    return [
+      "libraryInstanceId": libraryInstanceId.uuidString,
+      "changeSequence": String(changeSequence),
+      "order": "tiktok_recent_grid_v1",
+      "totalCount": totalCount,
+    ]
+  }
+
   private static func mediaTypeString(_ mediaType: PHAssetMediaType) -> String {
     switch mediaType {
     case .image: return "image"

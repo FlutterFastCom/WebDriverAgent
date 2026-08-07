@@ -35,14 +35,14 @@
 
 + (id<FBResponsePayload>)handleImport:(FBRouteRequest *)request
 {
-  return [self responseFromCommand:^(void (^completion)(NSDictionary * _Nullable, NSError * _Nullable)) {
+  return [self responseFromCommand:^(void (^completion)(id _Nullable, NSError * _Nullable)) {
     [FBPhotosCommands importWithArguments:request.arguments completion:completion];
   }];
 }
 
 + (id<FBResponsePayload>)handleImportBatch:(FBRouteRequest *)request
 {
-  return [self responseFromCommand:^(void (^completion)(NSDictionary * _Nullable, NSError * _Nullable)) {
+  return [self responseFromCommand:^(void (^completion)(id _Nullable, NSError * _Nullable)) {
     [FBPhotosCommands importBatchWithArguments:request.arguments completion:completion];
   }];
 }
@@ -54,25 +54,25 @@
                                              httpStatusCode:kHTTPStatusCodePreconditionFailed];
   }
 
-  return [self responseFromCommand:^(void (^completion)(NSDictionary * _Nullable, NSError * _Nullable)) {
+  return [self responseFromCommand:^(void (^completion)(id _Nullable, NSError * _Nullable)) {
     [FBPhotosCommands clearWithArguments:request.arguments completion:completion];
   }];
 }
 
 + (id<FBResponsePayload>)handleList:(FBRouteRequest *)request
 {
-  return [self responseFromCommand:^(void (^completion)(NSDictionary * _Nullable, NSError * _Nullable)) {
+  return [self responseFromCommand:^(void (^completion)(id _Nullable, NSError * _Nullable)) {
     [FBPhotosCommands listWithUrl:request.URL completion:completion];
   }];
 }
 
-+ (id<FBResponsePayload>)responseFromCommand:(void (^)(void (^completion)(NSDictionary * _Nullable, NSError * _Nullable)))command
++ (id<FBResponsePayload>)responseFromCommand:(void (^)(void (^completion)(id _Nullable, NSError * _Nullable)))command
 {
-  __block NSDictionary *result = nil;
+  __block id result = nil;
   __block NSError *commandError = nil;
   __block BOOL completedSynchronously = NO;
 
-  command(^(NSDictionary * _Nullable commandResult, NSError * _Nullable error) {
+  command(^(id _Nullable commandResult, NSError * _Nullable error) {
     result = commandResult;
     commandError = error;
     completedSynchronously = YES;
@@ -87,6 +87,9 @@
   }
 
   if (nil != commandError) {
+    if ([commandError.domain isEqualToString:@"FBPhotoListRequestError"]) {
+      return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:commandError.localizedDescription traceback:nil]);
+    }
     return FBResponseWithStatus([FBCommandStatus unknownErrorWithMessage:commandError.localizedDescription traceback:nil]);
   }
   return FBResponseWithObject(result ?: @{});

@@ -14,7 +14,7 @@ import Photos
 
 @objc(FBPhotosCommands)
 final class FBPhotosCommands: NSObject {
-  typealias Completion = (NSDictionary?, Error?) -> Void
+  typealias Completion = (Any?, Error?) -> Void
 
   @objc(importWithArguments:completion:)
   static func `import`(arguments: NSDictionary, completion: @escaping Completion) {
@@ -82,22 +82,26 @@ final class FBPhotosCommands: NSObject {
   @objc(listWithUrl:completion:)
   static func list(url: URL, completion: @escaping Completion) {
     #if os(iOS)
-    let limit = parsedLimit(from: url)
-    guard hasReadableAuthorization() else {
-      completion(nil, FBPhotosCommandError.permissionDenied)
-      return
+    do {
+      let request = try FBPhotoListRequest.parse(url: url)
+      switch request.mode {
+      case .legacy:
+        guard hasReadableAuthorization() else {
+          completion(nil, FBPhotosCommandError.permissionDenied)
+          return
+        }
+        completion(legacyList(limit: request.limit), nil)
+      case .exact:
+        guard #available(iOS 16, *) else {
+          throw FBPhotoSnapshotAuthorityError.persistentChangeHistoryUnavailable
+        }
+        let snapshot = try FBPhotoLibrarySnapshotAuthority.shared.read(limit: request.limit)
+        let assets = snapshot.assets.map { FBPhotoResponseFactory.listItem(asset: $0) }
+        completion(FBPhotoResponseFactory.exactList(assets: assets, snapshot: snapshot), nil)
+      }
+    } catch {
+      completion(nil, error)
     }
-
-    let options = PHFetchOptions()
-    options.fetchLimit = limit
-    options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-    let assets = PHAsset.fetchAssets(with: options)
-    var results: [NSDictionary] = []
-    results.reserveCapacity(min(limit, assets.count))
-    assets.enumerateObjects { asset, _, _ in
-      results.append(FBPhotoResponseFactory.listItem(asset: asset))
-    }
-    completion(["assets": results], nil)
     #else
     completion(nil, NSError(domain: "FBPhotosCommands", code: 1, userInfo: [NSLocalizedDescriptionKey: "Photos endpoints are only supported on iOS"]))
     #endif
@@ -127,7 +131,11 @@ private extension FBPhotosCommands {
         completion(nil, error)
         return
       }
-      guard let results = result?["results"] as? [NSDictionary], let firstResult = results.first else {
+      guard
+        let result = result as? NSDictionary,
+        let results = result["results"] as? [NSDictionary],
+        let firstResult = results.first
+      else {
         completion(nil, FBPhotosCommandError.assetCreationFailed)
         return
       }
@@ -207,17 +215,17 @@ private extension FBPhotosCommands {
     return FBPhotosPermissionHelper.hasFullReadWriteAuthorization()
   }
 
-  static func parsedLimit(from url: URL) -> Int {
-    let defaultLimit = 100
-    let maxLimit = 1000
-    guard
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      let rawLimit = components.queryItems?.first(where: { $0.name == "limit" })?.value,
-      let requestedLimit = Int(rawLimit)
-    else {
-      return defaultLimit
+  static func legacyList(limit: Int) -> [NSDictionary] {
+    let options = PHFetchOptions()
+    options.fetchLimit = limit
+    options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+    let assets = PHAsset.fetchAssets(with: options)
+    var results: [NSDictionary] = []
+    results.reserveCapacity(min(limit, assets.count))
+    assets.enumerateObjects { asset, _, _ in
+      results.append(FBPhotoResponseFactory.listItem(asset: asset))
     }
-    return min(max(requestedLimit, 0), maxLimit)
+    return results
   }
 
   static func durationMs(since startedAt: Date) -> Int {

@@ -21,6 +21,10 @@
 		FB10000C000000000000000C /* FBCustomEndpointTokens.h in Headers */ = {isa = PBXBuildFile; fileRef = FB2000060000000000000006 /* FBCustomEndpointTokens.h */; };
 		FB10000D000000000000000D /* FBPhotoTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000070000000000000007 /* FBPhotoTypes.swift */; };
 		FB10000E000000000000000E /* FBPhotoTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000070000000000000007 /* FBPhotoTypes.swift */; };
+		FB10000F000000000000000F /* FBPhotoListRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2000090000000000000009 /* FBPhotoListRequest.swift */; };
+		FB1000100000000000000010 /* FBPhotoLibrarySnapshotAuthority.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB20000A000000000000000A /* FBPhotoLibrarySnapshotAuthority.swift */; };
+		FB1000110000000000000011 /* FBPhotoListRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB20000B000000000000000B /* FBPhotoListRequestTests.swift */; };
+		FB1000120000000000000012 /* FBPhotoSnapshotContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB20000C000000000000000C /* FBPhotoSnapshotContinuityTests.swift */; };
 		A1001010000000000000101 /* FBForegroundTracker.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000020000000000000002 /* FBForegroundTracker.m */; };
 		A1001020000000000000102 /* FBPerfCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000040000000000000004 /* FBPerfCommands.m */; };
 		A1001030000000000000103 /* FBAppDataCommands.m in Sources */ = {isa = PBXBuildFile; fileRef = A2000060000000000000006 /* FBAppDataCommands.m */; };
@@ -1357,6 +1361,10 @@
 		FB2000050000000000000005 /* FBCustomEndpointTokens.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBCustomEndpointTokens.m; sourceTree = "<group>"; };
 		FB2000060000000000000006 /* FBCustomEndpointTokens.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBCustomEndpointTokens.h; sourceTree = "<group>"; };
 		FB2000070000000000000007 /* FBPhotoTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FBPhotoTypes.swift; sourceTree = "<group>"; };
+		FB2000090000000000000009 /* FBPhotoListRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FBPhotoListRequest.swift; sourceTree = "<group>"; };
+		FB20000A000000000000000A /* FBPhotoLibrarySnapshotAuthority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FBPhotoLibrarySnapshotAuthority.swift; sourceTree = "<group>"; };
+		FB20000B000000000000000B /* FBPhotoListRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FBPhotoListRequestTests.swift; sourceTree = "<group>"; };
+		FB20000C000000000000000C /* FBPhotoSnapshotContinuityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FBPhotoSnapshotContinuityTests.swift; sourceTree = "<group>"; };
 		A2000010000000000000001 /* FBForegroundTracker.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBForegroundTracker.h; sourceTree = "<group>"; };
 		A2000020000000000000002 /* FBForegroundTracker.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FBForegroundTracker.m; sourceTree = "<group>"; };
 		A2000030000000000000003 /* FBPerfCommands.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FBPerfCommands.h; sourceTree = "<group>"; };
@@ -1942,6 +1950,8 @@
 				A20001B000000000000001B /* TTElementFinder.h */,
 				A20001C000000000000001C /* TTElementFinder.m */,
 				FB2000070000000000000007 /* FBPhotoTypes.swift */,
+				FB2000090000000000000009 /* FBPhotoListRequest.swift */,
+				FB20000A000000000000000A /* FBPhotoLibrarySnapshotAuthority.swift */,
 				FB2000020000000000000002 /* FBPhotosBridge.h */,
 				FB2000010000000000000001 /* FBPhotosBridge.m */,
 				FB2000030000000000000003 /* FBPhotosCommands.swift */,
@@ -2184,6 +2194,8 @@
 			isa = PBXGroup;
 			children = (
 				ADBC39951D07840300327304 /* Doubles */,
+				FB20000B000000000000000B /* FBPhotoListRequestTests.swift */,
+				FB20000C000000000000000C /* FBPhotoSnapshotContinuityTests.swift */,
 				71A7EAFB1E229302001DA4F2 /* FBClassChainTests.m */,
 				EEE16E961D33A25500172525 /* FBConfigurationTests.m */,
 				ADBC39931D0782CD00327304 /* FBElementCacheTests.m */,
@@ -3464,6 +3476,8 @@
 				FB10000E000000000000000E /* FBPhotoTypes.swift in Sources */,
 				FB1000060000000000000006 /* FBPhotosCommands.swift in Sources */,
 				FB1000080000000000000008 /* FBPhotosPermissionHelper.swift in Sources */,
+				FB10000F000000000000000F /* FBPhotoListRequest.swift in Sources */,
+				FB1000100000000000000010 /* FBPhotoLibrarySnapshotAuthority.swift in Sources */,
 				FB10000A000000000000000A /* FBCustomEndpointTokens.m in Sources */,
 				EE158ABB1CBD456F00A3E3F0 /* FBCustomCommands.m in Sources */,
 				FB1000020000000000000002 /* FBPhotosBridge.m in Sources */,
@@ -3580,6 +3594,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				713352FD26CEF31D00523CBC /* FBLRUCacheTests.m in Sources */,
+				FB1000110000000000000011 /* FBPhotoListRequestTests.swift in Sources */,
+				FB1000120000000000000012 /* FBPhotoSnapshotContinuityTests.swift in Sources */,
 				EE3F8CFE1D08AA17006F02CE /* FBRunLoopSpinnerTests.m in Sources */,
 				714801D11FA9D9FA00DC5997 /* FBSDKVersionTests.m in Sources */,
 				EE3F8D001D08B05F006F02CE /* FBElementTypeTransformerTests.m in Sources */,
@@ -4400,6 +4416,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.facebook.WebDriverAgentCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -4417,6 +4434,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.facebook.WebDriverAgentCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
