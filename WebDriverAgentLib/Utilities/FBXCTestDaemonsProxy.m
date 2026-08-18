@@ -80,10 +80,10 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
 #pragma clang diagnostic pop
 }
 
-+ (id<XCTestManager_ManagerInterface>)testRunnerProxy
++ (id<XCTMessagingChannel_RunnerToDaemon>)testRunnerProxy
 {
-  static id<XCTestManager_ManagerInterface> proxy = nil;
-  if ([FBConfiguration shouldUseSingletonTestManager]) {
+  static id<XCTMessagingChannel_RunnerToDaemon> proxy = nil;
+  if (FBConfiguration.sharedInstance.shouldUseSingletonTestManager) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
       [FBLogger logFmt:@"Using singleton test manager"];
@@ -97,7 +97,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   return proxy;
 }
 
-+ (id<XCTestManager_ManagerInterface>)retrieveTestRunnerProxy
++ (id<XCTMessagingChannel_RunnerToDaemon>)retrieveTestRunnerProxy
 {
   return ((XCTRunnerDaemonSession *)[XCTRunnerDaemonSession sharedSession]).daemonProxy;
 }
@@ -113,7 +113,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
       completion();
     };
 
-    XCEventGeneratorHandler handlerBlock = ^(XCSynthesizedEventRecord *innerRecord, NSError *invokeError) {
+    void (^handlerBlock)(XCSynthesizedEventRecord *, NSError *) = ^(XCSynthesizedEventRecord *innerRecord, NSError *invokeError) {
       errorHandler(invokeError);
     };
     [[XCUIDevice.sharedDevice eventSynthesizer] synthesizeEvent:record completion:(id)^(BOOL result, NSError *invokeError) {
@@ -134,7 +134,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(openURL:usingApplication:completion:)]) {
     return [[[FBErrorBuilder builder]
-      withDescriptionFormat:@"The current Xcode SDK does not support opening of URLs with given application"]
+      withDescriptionFormat:@"The current OS runtime does not support opening URLs with a given application"]
      buildError:error];
   }
 
@@ -161,7 +161,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(openDefaultApplicationForURL:completion:)]) {
     return [[[FBErrorBuilder builder]
-      withDescriptionFormat:@"The current Xcode SDK does not support opening of URLs. Consider upgrading to Xcode 14.3+/iOS 16.4+"]
+      withDescriptionFormat:@"The current OS runtime does not support opening URLs. This API requires an iOS 16.4+ runtime"]
      buildError:error];
   }
 
@@ -189,7 +189,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(setSimulatedLocation:completion:)]) {
     return [[[FBErrorBuilder builder]
-      withDescriptionFormat:@"The current Xcode SDK does not support location simulation. Consider upgrading to Xcode 14.3+/iOS 16.4+"]
+      withDescriptionFormat:@"The current OS runtime does not support location simulation. This API requires an iOS 16.4+ runtime"]
      buildError:error];
   }
   if (![session supportsLocationSimulation]) {
@@ -221,7 +221,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(getSimulatedLocationWithReply:)]) {
     [[[FBErrorBuilder builder]
-      withDescriptionFormat:@"The current Xcode SDK does not support location simulation. Consider upgrading to Xcode 14.3+/iOS 16.4+"]
+      withDescriptionFormat:@"The current OS runtime does not support location simulation. This API requires an iOS 16.4+ runtime"]
      buildError:error];
     return nil;
   }
@@ -255,7 +255,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(clearSimulatedLocationWithReply:)]) {
     return [[[FBErrorBuilder builder]
-        withDescriptionFormat:@"The current Xcode SDK does not support location simulation. Consider upgrading to Xcode 14.3+/iOS 16.4+"]
+        withDescriptionFormat:@"The current OS runtime does not support location simulation. This API requires an iOS 16.4+ runtime"]
        buildError:error];
   }
   if (![session supportsLocationSimulation]) {
@@ -289,7 +289,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(startScreenRecordingWithRequest:withReply:)]) {
     [[[FBErrorBuilder builder]
-      withDescriptionFormat:@"The current Xcode SDK does not support screen recording. Consider upgrading to Xcode 15+/iOS 17+"]
+      withDescriptionFormat:@"The current OS runtime does not support screen recording. This API requires an iOS 17+ runtime"]
      buildError:error];
     return nil;
   }
@@ -331,7 +331,7 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
   XCTRunnerDaemonSession *session = [XCTRunnerDaemonSession sharedSession];
   if (![session respondsToSelector:@selector(stopScreenRecordingWithUUID:withReply:)]) {
     return [[[FBErrorBuilder builder]
-        withDescriptionFormat:@"The current Xcode SDK does not support screen recording. Consider upgrading to Xcode 15+/iOS 17+"]
+        withDescriptionFormat:@"The current OS runtime does not support screen recording. This API requires an iOS 17+ runtime"]
        buildError:error];
 
   }

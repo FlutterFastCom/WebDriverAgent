@@ -1,8 +1,9 @@
+import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {readFileSync} from 'node:fs';
-import axios from 'axios';
+
 import {logger, fs, mkdirp, net} from '@appium/support';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,9 +15,7 @@ const log = logger.getLogger('WDA');
  * Download all prebuilt WebDriverAgent archives for the current package version.
  */
 async function fetchPrebuiltWebDriverAgentAssets() {
-  const packageJson = JSON.parse(
-    readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'),
-  );
+  const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
   const tag = packageJson.version;
   log.info(`Getting links to webdriveragent release ${tag}`);
   const downloadUrl = `https://api.github.com/repos/appium/webdriveragent/releases/tags/v${tag}`;

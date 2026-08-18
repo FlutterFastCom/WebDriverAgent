@@ -219,11 +219,16 @@
     [element adjustToNormalizedSliderPosition:sliderValue];
     return FBResponseWithOK();
   }
-  NSUInteger frequency = (NSUInteger)[request.arguments[@"frequency"] longLongValue] ?: [FBConfiguration maxTypingFrequency];
+  NSUInteger frequency = (NSUInteger)[request.arguments[@"frequency"] longLongValue] ?: FBConfiguration.sharedInstance.maxTypingFrequency;
   NSError *error = nil;
+  // checkStaleness:YES above already took a fresh, verified-live snapshot of
+  // `element` and cached it as `lastSnapshot` - reuse it instead of paying
+  // for another round trip.
+  id<FBXCElementSnapshot> snapshot = element.lastSnapshot ?: element.fb_cachedSnapshot ?: [element fb_standardSnapshot];
   if (![element fb_typeText:textToType
                 shouldClear:NO
                   frequency:frequency
+                   snapshot:snapshot
                       error:&error]) {
     return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
   }
@@ -287,7 +292,7 @@
   if (![element fb_setFocusWithError:&error]) {
     return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
   }
-  return FBResponseWithStatus([FBCommandStatus okWithValue: FBDictionaryResponseWithElement(element, FBConfiguration.shouldUseCompactResponses)]);
+  return FBResponseWithStatus([FBCommandStatus okWithValue: FBDictionaryResponseWithElement(element, FBConfiguration.sharedInstance.shouldUseCompactResponses)]);
 }
 #else
 + (id<FBResponsePayload>)handleDoubleTap:(FBRouteRequest *)request
@@ -346,15 +351,15 @@
 
 + (id<FBResponsePayload>)handlePressAndDragCoordinateWithVelocity:(FBRouteRequest *)request
 {
-  FBSession *session = request.session;
+  XCUIApplication *application = request.session.activeApplication;
   CGVector startOffset = CGVectorMake((CGFloat)[request.arguments[@"fromX"] doubleValue],
                                      (CGFloat)[request.arguments[@"fromY"] doubleValue]);
   XCUICoordinate *startCoordinate = [self.class gestureCoordinateWithOffset:startOffset
-                                                                    element:session.activeApplication];
+                                                                    element:application];
   CGVector endOffset = CGVectorMake((CGFloat)[request.arguments[@"toX"] doubleValue],
                                     (CGFloat)[request.arguments[@"toY"] doubleValue]);
   XCUICoordinate *endCoordinate = [self.class gestureCoordinateWithOffset:endOffset
-                                                                  element:session.activeApplication];
+                                                                  element:application];
   [startCoordinate pressForDuration:[request.arguments[@"pressDuration"] doubleValue]
                thenDragToCoordinate:endCoordinate
                        withVelocity:[request.arguments[@"velocity"] doubleValue]
@@ -515,7 +520,7 @@
 + (id<FBResponsePayload>)handleKeys:(FBRouteRequest *)request
 {
   NSString *textToType = [request.arguments[@"value"] componentsJoinedByString:@""];
-  NSUInteger frequency = [request.arguments[@"frequency"] unsignedIntegerValue] ?: [FBConfiguration maxTypingFrequency];
+  NSUInteger frequency = [request.arguments[@"frequency"] unsignedIntegerValue] ?: FBConfiguration.sharedInstance.maxTypingFrequency;
   NSError *error;
   if (!FBTypeText(textToType, frequency, &error)) {
     return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description

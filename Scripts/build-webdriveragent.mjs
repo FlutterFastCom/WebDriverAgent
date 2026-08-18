@@ -1,8 +1,9 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+
 import {logger, fs} from '@appium/support';
-import {exec} from 'teen_process';
 import * as xcode from 'appium-xcode';
+import {exec} from 'teen_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,12 +16,7 @@ const WDA_BUNDLE = 'WebDriverAgentRunner-Runner.app';
 const WDA_BUNDLE_PATH = path.join(DERIVED_DATA_PATH, 'Build', 'Products', 'Debug-iphonesimulator');
 
 const WDA_BUNDLE_TV = 'WebDriverAgentRunner_tvOS-Runner.app';
-const WDA_BUNDLE_TV_PATH = path.join(
-  DERIVED_DATA_PATH,
-  'Build',
-  'Products',
-  'Debug-appletvsimulator',
-);
+const WDA_BUNDLE_TV_PATH = path.join(DERIVED_DATA_PATH, 'Build', 'Products', 'Debug-appletvsimulator');
 
 const TARGETS = ['runner', 'tv_runner'];
 const SDKS = ['sim', 'tv_sim'];
@@ -35,26 +31,18 @@ async function buildWebDriverAgent(xcodeVersion) {
   const sdk = process.env.SDK;
 
   if (!TARGETS.includes(target)) {
-    throw Error(
-      `Please set TARGETS environment variable from the supported targets ${JSON.stringify(TARGETS)}`,
-    );
+    throw Error(`Please set TARGETS environment variable from the supported targets ${JSON.stringify(TARGETS)}`);
   }
 
   if (!SDKS.includes(sdk)) {
-    throw Error(
-      `Please set SDK environment variable from the supported SDKs ${JSON.stringify(SDKS)}`,
-    );
+    throw Error(`Please set SDK environment variable from the supported SDKs ${JSON.stringify(SDKS)}`);
   }
 
   LOG.info(`Cleaning ${DERIVED_DATA_PATH} if exists`);
   try {
-    await exec(
-      'xcodebuild',
-      ['clean', '-derivedDataPath', DERIVED_DATA_PATH, '-scheme', 'WebDriverAgentRunner'],
-      {
-        cwd: ROOT_DIR,
-      },
-    );
+    await exec('xcodebuild', ['clean', '-derivedDataPath', DERIVED_DATA_PATH, '-scheme', 'WebDriverAgentRunner'], {
+      cwd: ROOT_DIR,
+    });
   } catch {}
 
   // Get Xcode version

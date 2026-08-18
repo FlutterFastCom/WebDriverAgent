@@ -120,6 +120,10 @@
 
 @end
 
+@interface FBNativeAccessibilityElementAttribute : FBElementAttribute
+
+@end
+
 @interface FBTraitsAttribute : FBElementAttribute
 
 @end
@@ -191,7 +195,7 @@ static NSString *const topNodeIndexPath = @"top";
       // If 'includeHittableInPageSource' setting is enabled, then use native snapshots
       // to calculate a more accurate value for the 'hittable' attribute.
       rc = [self xmlRepresentationWithRootElement:[self snapshotWithRoot:root
-                                                        useNative:FBConfiguration.includeHittableInPageSource]
+                                                        useNative:FBConfiguration.sharedInstance.includeHittableInPageSource]
                                            writer:writer
                                      elementStore:nil
                                             query:nil
@@ -248,7 +252,7 @@ static NSString *const topNodeIndexPath = @"top";
     [FBLogger logFmt:@"Failed to invoke libxml2>xmlTextWriterStartDocument. Error code: %d", rc];
   } else {
     [self waitUntilStableWithElement:root];
-    if (FBConfiguration.limitXpathContextScope) {
+    if (FBConfiguration.sharedInstance.limitXpathContextScope) {
       lookupScopeSnapshot = [self snapshotWithRoot:root useNative:useNativeSnapshot];
     } else {
       if ([root isKindOfClass:XCUIElement.class]) {
@@ -400,21 +404,25 @@ static NSString *const topNodeIndexPath = @"top";
   NSMutableSet<Class> *includedAttributes;
   if (nil == query) {
     includedAttributes = [NSMutableSet setWithArray:FBElementAttribute.supportedAttributes];
-    if (!FBConfiguration.includeHittableInPageSource) {
+    if (!FBConfiguration.sharedInstance.includeHittableInPageSource) {
       // The hittable attribute is expensive to calculate for each snapshot item
       // thus we only include it when requested explicitly
       [includedAttributes removeObject:FBHittableAttribute.class];
     }
-    if (!FBConfiguration.includeNativeFrameInPageSource) {
+    if (!FBConfiguration.sharedInstance.includeNativeFrameInPageSource) {
       // Include nativeFrame only when requested
       [includedAttributes removeObject:FBNativeFrameAttribute.class];
     }
-    if (!FBConfiguration.includeMinMaxValueInPageSource) {
+    if (!FBConfiguration.sharedInstance.includeNativeAccessibilityElementInPageSource) {
+      // Include the raw native accessibility flag only when requested
+      [includedAttributes removeObject:FBNativeAccessibilityElementAttribute.class];
+    }
+    if (!FBConfiguration.sharedInstance.includeMinMaxValueInPageSource) {
       // minValue/maxValue are retrieved from private APIs and may be slow on deep trees
       [includedAttributes removeObject:FBMinValueAttribute.class];
       [includedAttributes removeObject:FBMaxValueAttribute.class];
     }
-    if (!FBConfiguration.includeCustomActionsInPageSource) {
+    if (!FBConfiguration.sharedInstance.includeCustomActionsInPageSource) {
       // customActions are retrieved from accessibility attributes and may be slow on deep trees
       [includedAttributes removeObject:FBCustomActionsAttribute.class];
     }
@@ -612,7 +620,7 @@ static NSString *const topNodeIndexPath = @"top";
     return [(XCUIElement *)root fb_nativeSnapshot];
   }
   // https://github.com/appium/WebDriverAgent/issues/1085
-  return [root isKindOfClass:XCUIApplication.class] && !FBConfiguration.enforceCustomSnapshots
+  return [root isKindOfClass:XCUIApplication.class] && !FBConfiguration.sharedInstance.enforceCustomSnapshots
     ? [(XCUIElement *)root fb_standardSnapshot]
     : [(XCUIElement *)root fb_customSnapshot];
 }
@@ -622,7 +630,7 @@ static NSString *const topNodeIndexPath = @"top";
   if ([root isKindOfClass:XCUIElement.class]) {
     // If the app is not idle state while we retrieve the visiblity state
     // then the snapshot retrieval operation might freeze and time out
-    [[(XCUIElement *)root application] fb_waitUntilStableWithTimeout:FBConfiguration.animationCoolOffTimeout];
+    [[(XCUIElement *)root application] fb_waitUntilStableWithTimeout:FBConfiguration.sharedInstance.animationCoolOffTimeout];
   }
 }
 
@@ -686,6 +694,7 @@ static NSString *const FBAbstractMethodInvocationException = @"AbstractMethodInv
            FBEnabledAttribute.class,
            FBVisibleAttribute.class,
            FBAccessibleAttribute.class,
+           FBNativeAccessibilityElementAttribute.class,
 #if TARGET_OS_TV
            FBFocusedAttribute.class,
 #endif
@@ -951,6 +960,19 @@ static NSString *const FBAbstractMethodInvocationException = @"AbstractMethodInv
 + (NSString *)valueForElement:(id<FBElement>)element
 {
   return NSStringFromCGRect(element.wdNativeFrame);
+}
+@end
+
+@implementation FBNativeAccessibilityElementAttribute
+
++ (NSString *)name
+{
+  return @"nativeAccessibilityElement";
+}
+
++ (NSString *)valueForElement:(id<FBElement>)element
+{
+  return FBBoolToString(element.wdNativeAccessibilityElement);
 }
 @end
 

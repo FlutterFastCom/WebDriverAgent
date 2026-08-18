@@ -123,7 +123,21 @@ static bool fb_isLocked;
   if (fb_isLocked) {
     return YES;
   }
+#if TARGET_OS_SIMULATOR
   [self pressLockButton];
+#else
+  if (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"27.0")) {
+    // iOS 27: pressLockButton no longer locks; use a direct IOHID Power press (0x0C/0x30, ~0.5s hold).
+    if (![self fb_performIOHIDEventWithPage:0x0C
+                                      usage:0x30
+                                   duration:0.5
+                                      error:error]) {
+      return NO;
+    }
+  } else {
+    [self pressLockButton];
+  }
+#endif
   return [[[[FBRunLoopSpinner new]
             timeout:FBScreenLockTimeout]
            timeoutErrorMessage:@"Timed out while waiting until the screen gets locked"]
@@ -160,7 +174,7 @@ static bool fb_isLocked;
 
 - (NSData *)fb_screenshotWithError:(NSError*__autoreleasing*)error
 {
-  return [FBScreenshot takeInOriginalResolutionWithQuality:FBConfiguration.screenshotQuality
+  return [FBScreenshot takeInOriginalResolutionWithQuality:FBConfiguration.sharedInstance.screenshotQuality
                                                      error:error];
 }
 
@@ -229,7 +243,7 @@ static bool fb_isLocked;
     return [self fb_activateSiriVoiceRecognitionWithText:[NSString stringWithFormat:@"Open {%@}", url] error:error];
   }
 
-  NSString *description = [NSString stringWithFormat:@"Cannot open '%@' with the default application assigned for it. Consider upgrading to Xcode 14.3+/iOS 16.4+", url];
+  NSString *description = [NSString stringWithFormat:@"Cannot open '%@' with the default application assigned for it. This API requires an iOS 16.4+ runtime", url];
   return [[[FBErrorBuilder builder]
            withDescriptionFormat:@"%@", description]
           buildError:error];

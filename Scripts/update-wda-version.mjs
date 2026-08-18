@@ -1,5 +1,6 @@
-import {plist, logger} from '@appium/support';
 import path from 'node:path';
+
+import {plist, logger} from '@appium/support';
 import semver from 'semver';
 
 const log = logger.getLogger('Versioner');
@@ -25,9 +26,7 @@ async function updateWdaVersion() {
     throw new Error('No package version argument (use `--package-version=xxx`)');
   }
   if (!semver.valid(newVersion)) {
-    throw new Error(
-      `Invalid version specified '${newVersion}'. Version should be in the form '1.2.3'`,
-    );
+    throw new Error(`Invalid version specified '${newVersion}'. Version should be in the form '1.2.3'`);
   }
 
   const libManifest = path.resolve('WebDriverAgentLib', 'Info.plist');
