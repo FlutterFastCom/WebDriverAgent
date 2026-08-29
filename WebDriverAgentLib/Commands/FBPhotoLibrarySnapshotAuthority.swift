@@ -10,6 +10,7 @@ import Foundation
 
 #if os(iOS)
 import Photos
+import UIKit
 
 struct FBExactPhotoSnapshot {
   let assets: [PHAsset]
@@ -174,6 +175,18 @@ final class FBPhotoLibrarySnapshotAuthority: NSObject, PHPhotoLibraryChangeObser
     }
   }
 
+  func readReferences(limit: Int) throws -> FBExactPhotoReferenceSnapshot {
+    return try syncOnAuthorityQueue {
+      let authorizationRotated = state.noteAuthorization(readable: FBPhotosPermissionHelper.hasReadWriteAuthorization(allowLimited: true))
+      guard state.authorizationReadable == true else {
+        unregisterObserverIfNeeded()
+        throw FBPhotosCommandError.permissionDenied
+      }
+      registerObserverIfNeeded(alreadyRotated: authorizationRotated)
+      return try readStableReferences(limit: limit)
+    }
+  }
+
   func noteAuthorizationUnavailable() {
     syncOnAuthorityQueue {
       _ = state.noteAuthorization(readable: false)
@@ -238,6 +251,140 @@ final class FBPhotoLibrarySnapshotAuthority: NSObject, PHPhotoLibraryChangeObser
       )
     }
     throw FBPhotoSnapshotAuthorityError.photoLibraryBusy
+  }
+
+  @available(iOS 16, *)
+  private func readStableReferences(limit: Int) throws -> FBExactPhotoReferenceSnapshot {
+    guard (1...9).contains(limit) else {
+      throw FBPhotoReferenceError.insufficientAssets
+    }
+
+    for attempt in 1...FBPhotoStableCutGate<FBPhotoPersistentToken>.maximumAttempts {
+      let reconciledToken = FBPhotoPersistentToken(rawValue: photoLibrary.currentChangeToken)
+      let outcome = try reconcile(to: reconciledToken)
+      let fetchResult = PHAsset.fetchAssets(with: nil)
+      guard fetchResult.count >= limit else {
+        throw FBPhotoReferenceError.insufficientAssets
+      }
+
+      let assets = newestAssets(from: fetchResult, limit: limit)
+      guard assets.count == limit else {
+        throw FBPhotoReferenceError.insufficientAssets
+      }
+
+      var identifiers = Set<String>()
+      for asset in assets {
+        guard !asset.localIdentifier.isEmpty, identifiers.insert(asset.localIdentifier).inserted else {
+          throw FBPhotoReferenceError.insufficientAssets
+        }
+        guard asset.mediaType == .image || asset.mediaType == .video else {
+          throw FBPhotoReferenceError.unsupportedMediaType
+        }
+        guard asset.pixelWidth > 0, asset.pixelHeight > 0 else {
+          throw FBPhotoReferenceError.previewUnavailable
+        }
+      }
+
+      var references: [FBPhotoReferenceAsset] = []
+      references.reserveCapacity(assets.count)
+      var aggregateByteCount = 0
+      for asset in assets {
+        let preview = try renderReferencePreview(for: asset)
+        let (nextAggregate, overflow) = aggregateByteCount.addingReportingOverflow(preview.jpegData.count)
+        guard !overflow, nextAggregate <= 64_512 else {
+          throw FBPhotoReferenceError.aggregateTooLarge
+        }
+        aggregateByteCount = nextAggregate
+        references.append(FBPhotoReferenceAsset(asset: asset, preview: preview))
+      }
+
+      let postPreviewToken = FBPhotoPersistentToken(rawValue: photoLibrary.currentChangeToken)
+      guard FBPhotoStableCutGate.isStable(reconciledToken: reconciledToken, postFetchToken: postPreviewToken),
+            state.token == postPreviewToken else {
+        NSLog("photo.snapshot retry attempt=%d failure=unstable_reference_cut", attempt)
+        continue
+      }
+
+      logReconcile(outcome, returnedCount: references.count)
+      return FBExactPhotoReferenceSnapshot(
+        assets: references,
+        libraryInstanceId: state.libraryInstanceId,
+        changeSequence: state.changeSequence,
+        totalCount: fetchResult.count
+      )
+    }
+    throw FBPhotoSnapshotAuthorityError.photoLibraryBusy
+  }
+
+  private func renderReferencePreview(for asset: PHAsset) throws -> FBPhotoReferencePreview {
+    let sourceWidth = asset.pixelWidth
+    let sourceHeight = asset.pixelHeight
+    let longestEdge = max(sourceWidth, sourceHeight)
+    guard sourceWidth > 0, sourceHeight > 0, longestEdge > 0 else {
+      throw FBPhotoReferenceError.previewUnavailable
+    }
+
+    let scale = min(CGFloat(1), CGFloat(192) / CGFloat(longestEdge))
+    let targetWidth = max(1, Int(floor(CGFloat(sourceWidth) * scale)))
+    let targetHeight = max(1, Int(floor(CGFloat(sourceHeight) * scale)))
+    let options = PHImageRequestOptions()
+    options.version = .current
+    options.deliveryMode = .highQualityFormat
+    options.resizeMode = .exact
+    options.isNetworkAccessAllowed = false
+    options.isSynchronous = true
+
+    var callbackCount = 0
+    var resultImage: UIImage?
+    var resultInfo: [AnyHashable: Any]?
+    PHImageManager.default().requestImage(
+      for: asset,
+      targetSize: CGSize(width: targetWidth, height: targetHeight),
+      contentMode: .aspectFit,
+      options: options
+    ) { image, info in
+      callbackCount += 1
+      resultImage = image
+      resultInfo = info
+    }
+
+    guard callbackCount == 1,
+          let image = resultImage,
+          let cgImage = image.cgImage,
+          cgImage.width > 0,
+          cgImage.height > 0,
+          max(cgImage.width, cgImage.height) <= 192
+    else {
+      throw FBPhotoReferenceError.previewUnavailable
+    }
+
+    let info = resultInfo ?? [:]
+    guard !isTruthyImageInfo(info, key: PHImageCancelledKey),
+          !isTruthyImageInfo(info, key: PHImageResultIsInCloudKey),
+          !isTruthyImageInfo(info, key: PHImageResultIsDegradedKey),
+          info[PHImageErrorKey] == nil
+    else {
+      throw FBPhotoReferenceError.previewUnavailable
+    }
+
+    let qualityLadder: [CGFloat] = [0.60, 0.45, 0.30, 0.20, 0.12]
+    for quality in qualityLadder {
+      guard let jpegData = image.jpegData(compressionQuality: quality) else {
+        continue
+      }
+      if jpegData.count <= 7_168 {
+        return FBPhotoReferencePreview(
+          jpegData: jpegData,
+          pixelWidth: cgImage.width,
+          pixelHeight: cgImage.height
+        )
+      }
+    }
+    throw FBPhotoReferenceError.previewTooLarge
+  }
+
+  private func isTruthyImageInfo(_ info: [AnyHashable: Any], key: String) -> Bool {
+    return (info[key] as? NSNumber)?.boolValue == true
   }
 
   @available(iOS 16, *)

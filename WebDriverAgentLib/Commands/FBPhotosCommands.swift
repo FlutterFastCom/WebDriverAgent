@@ -98,6 +98,12 @@ final class FBPhotosCommands: NSObject {
         let snapshot = try FBPhotoLibrarySnapshotAuthority.shared.read(limit: request.limit)
         let assets = snapshot.assets.map { FBPhotoResponseFactory.listItem(asset: $0) }
         completion(FBPhotoResponseFactory.exactList(assets: assets, snapshot: snapshot), nil)
+      case .references:
+        guard #available(iOS 16, *) else {
+          throw FBPhotoSnapshotAuthorityError.persistentChangeHistoryUnavailable
+        }
+        let snapshot = try FBPhotoLibrarySnapshotAuthority.shared.readReferences(limit: request.limit)
+        completion(try FBPhotoResponseFactory.referenceList(snapshot: snapshot), nil)
       }
     } catch {
       completion(nil, error)

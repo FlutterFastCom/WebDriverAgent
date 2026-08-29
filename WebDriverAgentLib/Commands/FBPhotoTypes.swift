@@ -45,6 +45,44 @@ struct FBPhotoImportItem {
   let uti: String?
 }
 
+struct FBPhotoReferencePreview {
+  let jpegData: Data
+  let pixelWidth: Int
+  let pixelHeight: Int
+}
+
+struct FBPhotoReferenceAsset {
+  let asset: PHAsset
+  let preview: FBPhotoReferencePreview
+}
+
+struct FBExactPhotoReferenceSnapshot {
+  let assets: [FBPhotoReferenceAsset]
+  let libraryInstanceId: UUID
+  let changeSequence: UInt64
+  let totalCount: Int
+}
+
+enum FBPhotoReferenceError: LocalizedError {
+  case insufficientAssets
+  case unsupportedMediaType
+  case previewUnavailable
+  case previewTooLarge
+  case aggregateTooLarge
+  case responseTooLarge
+
+  var errorDescription: String? {
+    switch self {
+    case .insufficientAssets: return "insufficient_assets"
+    case .unsupportedMediaType: return "unsupported_media_type"
+    case .previewUnavailable: return "preview_unavailable"
+    case .previewTooLarge: return "preview_too_large"
+    case .aggregateTooLarge: return "aggregate_too_large"
+    case .responseTooLarge: return "response_too_large"
+    }
+  }
+}
+
 enum FBPhotosCommandError: LocalizedError {
   case invalidData
   case invalidItems
@@ -96,6 +134,84 @@ enum FBPhotoResponseFactory {
         totalCount: snapshot.totalCount
       ),
     ]
+  }
+
+  static func referenceList(snapshot: FBExactPhotoReferenceSnapshot) throws -> NSDictionary {
+    guard (1...9).contains(snapshot.assets.count),
+          snapshot.totalCount >= snapshot.assets.count
+    else {
+      throw FBPhotoReferenceError.insufficientAssets
+    }
+
+    var identifiers = Set<String>()
+    var aggregateByteCount = 0
+    var assets: [NSDictionary] = []
+    assets.reserveCapacity(snapshot.assets.count)
+
+    for referenceAsset in snapshot.assets {
+      let asset = referenceAsset.asset
+      let identifier = asset.localIdentifier
+      guard !identifier.isEmpty, identifiers.insert(identifier).inserted else {
+        throw FBPhotoReferenceError.insufficientAssets
+      }
+
+      let mediaType = mediaTypeString(asset.mediaType)
+      guard mediaType == "image" || mediaType == "video" else {
+        throw FBPhotoReferenceError.unsupportedMediaType
+      }
+
+      let preview = referenceAsset.preview
+      guard preview.pixelWidth > 0,
+            preview.pixelHeight > 0,
+            max(preview.pixelWidth, preview.pixelHeight) <= 192
+      else {
+        throw FBPhotoReferenceError.previewUnavailable
+      }
+      guard !preview.jpegData.isEmpty, preview.jpegData.count <= 7_168 else {
+        throw FBPhotoReferenceError.previewTooLarge
+      }
+      let (nextAggregate, overflow) = aggregateByteCount.addingReportingOverflow(preview.jpegData.count)
+      guard !overflow, nextAggregate <= 64_512 else {
+        throw FBPhotoReferenceError.aggregateTooLarge
+      }
+      aggregateByteCount = nextAggregate
+
+      let jpegBase64 = preview.jpegData.base64EncodedString(options: [])
+      guard let decodedJPEG = Data(base64Encoded: jpegBase64, options: []), decodedJPEG == preview.jpegData else {
+        throw FBPhotoReferenceError.previewUnavailable
+      }
+
+      let reference: NSDictionary = [
+        "mimeType": "image/jpeg",
+        "jpegBase64": jpegBase64,
+        "byteCount": preview.jpegData.count,
+        "pixelWidth": preview.pixelWidth,
+        "pixelHeight": preview.pixelHeight,
+      ]
+      let assetValue = NSMutableDictionary(dictionary: listItem(asset: asset))
+      assetValue["reference"] = reference
+      assets.append(assetValue)
+    }
+
+    let value: NSDictionary = [
+      "referenceMode": "ordered_jpeg_v1",
+      "assets": assets,
+      "snapshot": snapshotValue(
+        libraryInstanceId: snapshot.libraryInstanceId,
+        changeSequence: snapshot.changeSequence,
+        totalCount: snapshot.totalCount
+      ),
+    ]
+    let envelope: NSDictionary = [
+      "sessionId": "00000000-0000-0000-0000-000000000000",
+      "value": value,
+    ]
+    guard let serialized = try? JSONSerialization.data(withJSONObject: envelope, options: [.prettyPrinted]),
+          serialized.count <= 98_304
+    else {
+      throw FBPhotoReferenceError.responseTooLarge
+    }
+    return value
   }
 
   static func snapshotValue(

@@ -13,11 +13,22 @@
 #import "XCUIApplication+FBTouchAction.h"
 #import "XCUIElement.h"
 #import "XCUIElementQuery.h"
+#import <CoreFoundation/CoreFoundation.h>
+#import <math.h>
 static NSInteger TTInputMs(NSDate *s) { return (NSInteger)([[NSDate date] timeIntervalSinceDate:s] * 1000); }
 static const NSTimeInterval TTClearHoldBase = 2.5;  // floor hold; clears short fields (proven: 2.5s cleared 7 chars)
 static const NSTimeInterval TTClearHoldPerChar = 0.03; // linear add per estimated char (conservative vs accel-delete)
 static const NSTimeInterval TTClearHoldMax = 8.0;   // cap — stays well under the 15s WDA HTTP timeout
 static const NSTimeInterval TTClearHoldBlind = 5.5; // hold when no length estimate is supplied
+typedef struct {
+  CGPoint from;
+  CGPoint to;
+  NSUInteger startHoldMs;
+  NSUInteger moveDurationMs;
+  NSUInteger moveSteps;
+  NSUInteger endHoldMs;
+} TTHeldSwipeRequest;
+
 static NSString *TTElementDebugName(XCUIElement *element);
 static BOOL TTElementIsInsideKeyboard(XCUIElement *element, CGRect keyboardFrame);
 static XCUIElement *TTFirstExistingElement(XCUIElementQuery *query, NSTimeInterval timeout);
@@ -25,6 +36,157 @@ static BOOL TTKeyboardIndicatorsExist(XCUIApplication *app);
 static XCUIElement *TTFindDeleteKeyByAX(XCUIApplication *app, XCUIElement *keyboard, NSString **strategy);
 static BOOL TTPressKeyboardDeleteCoordinateFallback(XCUIElement *keyboard, NSTimeInterval hold, NSString **strategy);
 static BOOL TTPressThirdPartyDeleteCoordinateFallback(XCUIApplication *app, NSTimeInterval hold, NSString **strategy, NSString **failureReason);
+static BOOL TTDictionaryHasExactKeys(NSDictionary *dictionary, NSSet *expectedKeys);
+static BOOL TTParseFiniteJSONDouble(id value, double *output);
+static BOOL TTParseExactNonnegativeInteger(id value, NSUInteger *output);
+static BOOL TTParseHeldSwipeRequest(NSDictionary *arguments, TTHeldSwipeRequest *output, XCUIApplication **application);
+
+static BOOL TTDictionaryHasExactKeys(NSDictionary *dictionary, NSSet *expectedKeys)
+{
+  return nil != dictionary
+    && dictionary.count == expectedKeys.count
+    && [[NSSet setWithArray:dictionary.allKeys] isEqualToSet:expectedKeys];
+}
+
+static BOOL TTIsJSONNumber(id value)
+{
+  return [value isKindOfClass:[NSNumber class]]
+    && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID();
+}
+
+static BOOL TTParseFiniteJSONDouble(id value, double *output)
+{
+  if (!TTIsJSONNumber(value)) {
+    return NO;
+  }
+  double parsed = [value doubleValue];
+  if (!isfinite(parsed)) {
+    return NO;
+  }
+  if (nil != output) {
+    *output = parsed;
+  }
+  return YES;
+}
+
+static BOOL TTParseExactNonnegativeInteger(id value, NSUInteger *output)
+{
+  double parsed = 0;
+  if (!TTParseFiniteJSONDouble(value, &parsed)
+      || parsed < 0
+      || floor(parsed) != parsed
+      || parsed > 9007199254740991.0) {
+    return NO;
+  }
+  NSUInteger integerValue = (NSUInteger)parsed;
+  if ((double)integerValue != parsed) {
+    return NO;
+  }
+  if (nil != output) {
+    *output = integerValue;
+  }
+  return YES;
+}
+
+static BOOL TTFiniteViewportFrame(CGRect frame)
+{
+  return !CGRectIsNull(frame)
+    && !CGRectIsEmpty(frame)
+    && isfinite(CGRectGetMinX(frame))
+    && isfinite(CGRectGetMinY(frame))
+    && isfinite(CGRectGetMaxX(frame))
+    && isfinite(CGRectGetMaxY(frame));
+}
+
+static BOOL TTPointIsInsideViewport(double x, double y, CGRect frame)
+{
+  return x >= CGRectGetMinX(frame)
+    && x <= CGRectGetMaxX(frame)
+    && y >= CGRectGetMinY(frame)
+    && y <= CGRectGetMaxY(frame);
+}
+
+static BOOL TTParseHeldSwipeRequest(NSDictionary *arguments, TTHeldSwipeRequest *output, XCUIApplication **application)
+{
+  NSSet *topLevelKeys = [NSSet setWithObjects:@"from", @"to", @"controlPoints", @"durationMs", @"held", nil];
+  if (!TTDictionaryHasExactKeys(arguments, topLevelKeys)) {
+    return NO;
+  }
+
+  NSDictionary *from = arguments[@"from"];
+  NSDictionary *to = arguments[@"to"];
+  NSDictionary *held = arguments[@"held"];
+  if (![from isKindOfClass:[NSDictionary class]]
+      || ![to isKindOfClass:[NSDictionary class]]
+      || ![held isKindOfClass:[NSDictionary class]]
+      || !TTDictionaryHasExactKeys(from, [NSSet setWithObjects:@"x", @"y", nil])
+      || !TTDictionaryHasExactKeys(to, [NSSet setWithObjects:@"x", @"y", nil])
+      || !TTDictionaryHasExactKeys(held, [NSSet setWithObjects:@"mode", @"startHoldMs", @"moveSteps", @"endHoldMs", nil])
+      || ![arguments[@"controlPoints"] isKindOfClass:[NSArray class]]
+      || [arguments[@"controlPoints"] count] != 0
+      || ![held[@"mode"] isKindOfClass:[NSString class]]
+      || ![held[@"mode"] isEqualToString:@"continuous_drag_v1"]) {
+    return NO;
+  }
+
+  double fromX = 0;
+  double fromY = 0;
+  double toX = 0;
+  double toY = 0;
+  NSUInteger moveDurationMs = 0;
+  NSUInteger startHoldMs = 0;
+  NSUInteger moveSteps = 0;
+  NSUInteger endHoldMs = 0;
+  if (!TTParseFiniteJSONDouble(from[@"x"], &fromX)
+      || !TTParseFiniteJSONDouble(from[@"y"], &fromY)
+      || !TTParseFiniteJSONDouble(to[@"x"], &toX)
+      || !TTParseFiniteJSONDouble(to[@"y"], &toY)
+      || !TTParseExactNonnegativeInteger(arguments[@"durationMs"], &moveDurationMs)
+      || !TTParseExactNonnegativeInteger(held[@"startHoldMs"], &startHoldMs)
+      || !TTParseExactNonnegativeInteger(held[@"moveSteps"], &moveSteps)
+      || !TTParseExactNonnegativeInteger(held[@"endHoldMs"], &endHoldMs)) {
+    return NO;
+  }
+
+  if (moveDurationMs < 100 || moveDurationMs > 5000
+      || startHoldMs > 2000 || endHoldMs > 2000
+      || moveSteps < 1 || moveSteps > 60) {
+    return NO;
+  }
+  if (startHoldMs > NSUIntegerMax - moveDurationMs) {
+    return NO;
+  }
+  NSUInteger plannedDurationMs = startHoldMs + moveDurationMs;
+  if (endHoldMs > NSUIntegerMax - plannedDurationMs
+      || plannedDurationMs + endHoldMs > 8000) {
+    return NO;
+  }
+
+  XCUIApplication *app = XCUIApplication.fb_activeApplication;
+  XCUIElement *window = [app.windows firstMatch];
+  if (nil == app || nil == window || ![window exists]) {
+    return NO;
+  }
+  CGRect frame = window.frame;
+  if (!TTFiniteViewportFrame(frame)
+      || !TTPointIsInsideViewport(fromX, fromY, frame)
+      || !TTPointIsInsideViewport(toX, toY, frame)) {
+    return NO;
+  }
+
+  if (nil != output) {
+    output->from = CGPointMake((CGFloat)fromX, (CGFloat)fromY);
+    output->to = CGPointMake((CGFloat)toX, (CGFloat)toY);
+    output->startHoldMs = startHoldMs;
+    output->moveDurationMs = moveDurationMs;
+    output->moveSteps = moveSteps;
+    output->endHoldMs = endHoldMs;
+  }
+  if (nil != application) {
+    *application = app;
+  }
+  return YES;
+}
 
 static NSString *TTElementDebugName(XCUIElement *element)
 {
@@ -187,7 +349,7 @@ static BOOL TTPressThirdPartyDeleteCoordinateFallback(XCUIApplication *app, NSTi
   return @[
     /** HTTP verb: POST; path: /wda/keyboard/type-with-delay; request schema: {text:string,charDelayMs:number}; response schema: {ok,charCount,charDelayMs,durationMs}; error codes: 400/500; capability token: keyboard.type-with-delay */
     [[FBRoute POST:@"/wda/keyboard/type-with-delay"].withoutSession respondWithTarget:self action:@selector(handleTypeWithDelay:)],
-    /** HTTP verb: POST; path: /wda/touch/swipe-bezier; request schema: {from:{x,y},to:{x,y},controlPoints:[{x,y}],durationMs:number}; response schema: {ok,steps,controlPointCount,durationMs}; error codes: 400/500; capability token: touch.swipe-bezier */
+    /** HTTP verb: POST; path: /wda/touch/swipe-bezier; request schema: {from:{x,y},to:{x,y},controlPoints:[{x,y}],durationMs:number,held?:{mode,startHoldMs,moveSteps,endHoldMs}}; response schema: legacy {ok,steps,controlPointCount,durationMs} or held {ok,mode,steps,controlPointCount,startHoldMs,moveDurationMs,durationMs,endHoldMs}; error codes: 400/500; capability token: touch.swipe-bezier */
     [[FBRoute POST:@"/wda/touch/swipe-bezier"].withoutSession respondWithTarget:self action:@selector(handleSwipeBezier:)],
     /** HTTP verb: POST; path: /wda/keyboard/clear-field; request schema: none; response schema: {ok,durationMs}; error codes: 404/500; capability token: keyboard.clear-field */
     [[FBRoute POST:@"/wda/keyboard/clear-field"].withoutSession respondWithTarget:self action:@selector(handleClearField:)],
@@ -203,6 +365,95 @@ static BOOL TTPressThirdPartyDeleteCoordinateFallback(XCUIApplication *app, NSTi
 }
 + (id<FBResponsePayload>)handleSwipeBezier:(FBRouteRequest *)request
 {
+  if ([request.arguments.allKeys containsObject:@"held"]) {
+    TTHeldSwipeRequest heldRequest = {0};
+    XCUIApplication *app = nil;
+    if (!TTParseHeldSwipeRequest(request.arguments, &heldRequest, &app)) {
+      return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"invalid held request" traceback:nil]);
+    }
+
+    NSArray<NSValue *> *path = [FBBezierInterpolator pointsAlongCurveFrom:heldRequest.from
+                                                                        to:heldRequest.to
+                                                              controlPoints:@[]
+                                                                        steps:heldRequest.moveSteps];
+    if (path.count != heldRequest.moveSteps + 1) {
+      return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"insufficient path points" traceback:nil]);
+    }
+
+    NSDate *startedAt = [NSDate date];
+    CGFloat perMoveMs = (CGFloat)heldRequest.moveDurationMs / (CGFloat)heldRequest.moveSteps;
+    NSMutableArray *actionItems = [NSMutableArray arrayWithCapacity:heldRequest.moveSteps + 5];
+    CGPoint startPoint = [path[0] CGPointValue];
+    [actionItems addObject:@{
+      @"type": @"pointerMove",
+      @"x": @(startPoint.x),
+      @"y": @(startPoint.y),
+      @"origin": @"viewport",
+      @"duration": @(0),
+    }];
+    [actionItems addObject:@{
+      @"type": @"pointerDown",
+      @"button": @(0),
+    }];
+    [actionItems addObject:@{
+      @"type": @"pause",
+      @"duration": @(heldRequest.startHoldMs),
+    }];
+    for (NSUInteger i = 1; i < path.count; i++) {
+      CGPoint point = [path[i] CGPointValue];
+      [actionItems addObject:@{
+        @"type": @"pointerMove",
+        @"x": @(point.x),
+        @"y": @(point.y),
+        @"origin": @"viewport",
+        @"duration": @(perMoveMs),
+      }];
+    }
+    [actionItems addObject:@{
+      @"type": @"pause",
+      @"duration": @(heldRequest.endHoldMs),
+    }];
+    [actionItems addObject:@{
+      @"type": @"pointerUp",
+      @"button": @(0),
+    }];
+
+    NSArray *w3cActions = @[
+      @{
+        @"type": @"pointer",
+        @"id": @"swipe-bezier",
+        @"parameters": @{@"pointerType": @"touch"},
+        @"actions": actionItems,
+      }
+    ];
+    NSError *synthError = nil;
+    BOOL ok = [app fb_performW3CActions:w3cActions elementCache:nil error:&synthError];
+    NSInteger durationMs = TTInputMs(startedAt);
+    if (!ok) {
+      FBLogWarn(@"touch.swipe-bezier synth_failed reason=%@", synthError.localizedDescription);
+      return [[FBResponseJSONPayload alloc]
+              initWithDictionary:@{@"error": @"gesture_failed",
+                                   @"message": synthError.localizedDescription ?: @"unknown",
+                                   @"durationMs": @(durationMs)}
+              httpStatusCode:kHTTPStatusCodeInternalServerError];
+    }
+
+    FBLogVerbose(@"touch.swipe-bezier mode=continuous_drag_v1 steps=%lu startHoldMs=%lu moveDurationMs=%lu endHoldMs=%lu durationMs=%ld",
+                 (unsigned long)heldRequest.moveSteps,
+                 (unsigned long)heldRequest.startHoldMs,
+                 (unsigned long)heldRequest.moveDurationMs,
+                 (unsigned long)heldRequest.endHoldMs,
+                 (long)durationMs);
+    return FBResponseWithObject(@{@"ok": @YES,
+                                  @"mode": @"continuous_drag_v1",
+                                  @"steps": @(heldRequest.moveSteps),
+                                  @"controlPointCount": @(0),
+                                  @"startHoldMs": @(heldRequest.startHoldMs),
+                                  @"moveDurationMs": @(heldRequest.moveDurationMs),
+                                  @"durationMs": @(durationMs),
+                                  @"endHoldMs": @(heldRequest.endHoldMs)});
+  }
+
   NSDictionary *from = request.arguments[@"from"];
   NSDictionary *to = request.arguments[@"to"];
   NSNumber *dur = request.arguments[@"durationMs"];
