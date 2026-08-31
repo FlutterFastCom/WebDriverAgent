@@ -8,6 +8,10 @@
 
 #import "FBSessionCommands.h"
 
+#if TARGET_OS_WATCH
+@import WatchKit;
+#endif
+
 #import "FBCapabilities.h"
 #import "FBConfiguration.h"
 #import "FBCustomEndpointTokens.h"
@@ -19,6 +23,7 @@
 #import "FBSettings.h"
 #import "FBSettingsHandler.h"
 #import "FBRuntimeUtils.h"
+#import "FBXCAXClientProxy.h"
 #import "FBXCodeCompatibility.h"
 #import "XCUIApplication+FBHelpers.h"
 #import "XCUIApplication+FBQuiescence.h"
@@ -44,8 +49,8 @@
     [[FBRoute POST:@"/wda/apps/state"] respondWithTarget:self action:@selector(handleSessionAppState:)],
     [[FBRoute GET:@"/wda/apps/list"] respondWithTarget:self action:@selector(handleGetActiveAppsList:)],
     [[FBRoute GET:@""] respondWithTarget:self action:@selector(handleGetActiveSession:)],
-    [[FBRoute DELETE:@""] respondWithTarget:self action:@selector(handleDeleteSession:)],
-    [[FBRoute GET:@"/status"].withoutSession respondWithTarget:self action:@selector(handleGetStatus:)],
+    [[FBRoute DELETE:@""].standalone respondWithTarget:self action:@selector(handleDeleteSession:)],
+    [[FBRoute GET:@"/status"].withoutSession.standalone respondWithTarget:self action:@selector(handleGetStatus:)],
 
     // Health check might modify simulator state so it should only be called in-between testing sessions
     [[FBRoute GET:@"/wda/healthcheck"].withoutSession respondWithTarget:self action:@selector(handleGetHealthCheck:)],
@@ -86,9 +91,7 @@
 
 + (id<FBResponsePayload>)handleCreateSession:(FBRouteRequest *)request
 {
-  if (nil != FBSession.activeSession) {
-    [FBSession.activeSession kill];
-  }
+  [FBSession killActiveSessionAndWaitForTeardown];
 
   NSDictionary<NSString *, id> *capabilities;
   id<FBResponsePayload> errorResponse = [self capabilitiesFromCreateSessionRequest:request
@@ -190,6 +193,16 @@
     [buildInfo setObject:version forKey:@"version"];
   }
 
+#if TARGET_OS_WATCH
+  NSString *osName = @"watchOS";
+  NSString *osVersion = WKInterfaceDevice.currentDevice.systemVersion;
+  NSString *deviceKind = @"watch";
+#else
+  NSString *osName = [[UIDevice currentDevice] systemName];
+  NSString *osVersion = [[UIDevice currentDevice] systemVersion];
+  NSString *deviceKind = [self.class deviceNameByUserInterfaceIdiom:[UIDevice currentDevice].userInterfaceIdiom];
+#endif
+
   return FBResponseWithObject(
     @{
       @"ready" : @YES,
@@ -197,21 +210,21 @@
       @"state" : @"success",
       @"os" :
         @{
-          @"name" : [[UIDevice currentDevice] systemName],
-          @"version" : [[UIDevice currentDevice] systemVersion],
+          @"name" : osName,
+          @"version" : osVersion,
           @"sdkVersion": FBSDKVersion() ?: @"unknown",
           @"testmanagerdVersion": @(FBTestmanagerdVersion()),
         },
       @"ios" :
         @{
-#if TARGET_OS_SIMULATOR
-          @"simulatorVersion" : [[UIDevice currentDevice] systemVersion],
+#if TARGET_OS_SIMULATOR && !TARGET_OS_WATCH
+          @"simulatorVersion" : osVersion,
 #endif
           @"ip" : [XCUIDevice sharedDevice].fb_wifiIPAddress ?: [NSNull null]
         },
       @"customEndpoints" : FBCustomEndpointTokens,
       @"build" : buildInfo.copy,
-      @"device": [self.class deviceNameByUserInterfaceIdiom:[UIDevice currentDevice].userInterfaceIdiom]
+      @"device": deviceKind
     }
   );
 }
@@ -299,6 +312,9 @@
   if (nil != capabilities[FB_SETTING_WAIT_FOR_IDLE_TIMEOUT]) {
     FBConfiguration.sharedInstance.waitForIdleTimeout = [capabilities[FB_SETTING_WAIT_FOR_IDLE_TIMEOUT] doubleValue];
   }
+  if (nil != capabilities[FB_SETTING_ACCESSIBILITY_DEADLINE]) {
+    FBConfiguration.sharedInstance.accessibilityDeadline = [capabilities[FB_SETTING_ACCESSIBILITY_DEADLINE] doubleValue];
+  }
   if (nil == capabilities[FB_CAP_FORCE_SIMULATOR_SOFTWARE_KEYBOARD_PRESENCE] ||
       [capabilities[FB_CAP_FORCE_SIMULATOR_SOFTWARE_KEYBOARD_PRESENCE] boolValue]) {
     [FBConfiguration.sharedInstance forceSimulatorSoftwareKeyboardPresence];
@@ -363,18 +379,22 @@
       return errorResponse;
     }
   } else {
-    NSTimeInterval defaultTimeout = _XCTApplicationStateTimeout();
-    if (nil != capabilities[FB_CAP_APP_LAUNCH_STATE_TIMEOUT_SEC]) {
-      _XCTSetApplicationStateTimeout([capabilities[FB_CAP_APP_LAUNCH_STATE_TIMEOUT_SEC] doubleValue]);
-    }
-    @try {
-      [app launch];
-    } @catch (NSException *e) {
-      return FBResponseWithStatus([FBCommandStatus sessionNotCreatedError:e.reason traceback:nil]);
-    } @finally {
-      if (nil != capabilities[FB_CAP_APP_LAUNCH_STATE_TIMEOUT_SEC]) {
-        _XCTSetApplicationStateTimeout(defaultTimeout);
+    __block id<FBResponsePayload> launchErrorResponse;
+    void (^launchBlock)(void) = ^{
+      @try {
+        [app launch];
+      } @catch (NSException *e) {
+        launchErrorResponse = FBResponseWithStatus([FBCommandStatus sessionNotCreatedError:e.reason traceback:nil]);
       }
+    };
+    if (nil != capabilities[FB_CAP_APP_LAUNCH_STATE_TIMEOUT_SEC]) {
+      [FBXCAXClientProxy withApplicationStateTimeout:[capabilities[FB_CAP_APP_LAUNCH_STATE_TIMEOUT_SEC] doubleValue]
+                                                   do:launchBlock];
+    } else {
+      launchBlock();
+    }
+    if (nil != launchErrorResponse) {
+      return launchErrorResponse;
     }
   }
 
@@ -433,6 +453,7 @@
   };
 }
 
+#if !TARGET_OS_WATCH
 /*
  Return the device kind as lower case
 */
@@ -449,26 +470,32 @@
   return @"Unknown";
 
 }
+#endif
 
 + (NSDictionary *)currentCapabilities
 {
+#if TARGET_OS_WATCH
+  return
+  @{
+    @"device": @"watch",
+    @"sdkVersion": WKInterfaceDevice.currentDevice.systemVersion
+  };
+#else
   return
   @{
     @"device": [self.class deviceNameByUserInterfaceIdiom:[UIDevice currentDevice].userInterfaceIdiom],
     @"sdkVersion": [[UIDevice currentDevice] systemVersion]
   };
+#endif
 }
 
 +(nullable id<FBResponsePayload>)openDeepLink:(NSString *)initialUrl
                               withApplication:(nullable NSString *)bundleID
                                       timeout:(nullable NSNumber *)timeout
 {
-  NSError *openError;
-  NSTimeInterval defaultTimeout = _XCTApplicationStateTimeout();
-  if (nil != timeout) {
-    _XCTSetApplicationStateTimeout([timeout doubleValue]);
-  }
-  @try {
+  __block id<FBResponsePayload> response;
+  void (^openBlock)(void) = ^{
+    NSError *openError;
     BOOL result = nil == bundleID
       ? [XCUIDevice.sharedDevice fb_openUrl:initialUrl
                                       error:&openError]
@@ -476,16 +503,18 @@
                             withApplication:(id)bundleID
                                       error:&openError];
     if (result) {
-      return nil;
+      return;
     }
     NSString *errorMsg = [NSString stringWithFormat:@"Cannot open the URL %@ with the %@ application. Original error: %@",
                           initialUrl, bundleID ?: @"default", openError.localizedDescription];
-    return FBResponseWithStatus([FBCommandStatus sessionNotCreatedError:errorMsg traceback:nil]);
-  } @finally {
-    if (nil != timeout) {
-      _XCTSetApplicationStateTimeout(defaultTimeout);
-    }
+    response = FBResponseWithStatus([FBCommandStatus sessionNotCreatedError:errorMsg traceback:nil]);
+  };
+  if (nil != timeout) {
+    [FBXCAXClientProxy withApplicationStateTimeout:[timeout doubleValue] do:openBlock];
+  } else {
+    openBlock();
   }
+  return response;
 }
 
 @end

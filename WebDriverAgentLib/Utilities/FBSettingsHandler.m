@@ -142,6 +142,10 @@ static NSSet<NSString *> *FBNilClearableSettingKeys(void)
       FBConfiguration.sharedInstance.animationCoolOffTimeout = [value doubleValue];
       return nil;
     };
+    map[FB_SETTING_ACCESSIBILITY_DEADLINE] = ^FBCommandStatus *(FBSession *session, id value) {
+      FBConfiguration.sharedInstance.accessibilityDeadline = [value doubleValue];
+      return nil;
+    };
     map[FB_SETTING_DEFAULT_ALERT_ACTION] = ^FBCommandStatus *(FBSession *session, id value) {
       if (nil == value) {
         session.defaultAlertAction = nil;
@@ -186,7 +190,7 @@ static NSSet<NSString *> *FBNilClearableSettingKeys(void)
       FBConfiguration.sharedInstance.limitXpathContextScope = [value boolValue];
       return nil;
     };
-#if !TARGET_OS_TV
+#if !TARGET_OS_TV && !TARGET_OS_WATCH
     map[FB_SETTING_SCREENSHOT_ORIENTATION] = ^FBCommandStatus *(FBSession *session, id value) {
       NSError *error;
       if (![FBConfiguration.sharedInstance setScreenshotOrientation:(NSString *)value error:&error]) {
@@ -249,6 +253,9 @@ static NSSet<NSString *> *FBNilClearableSettingKeys(void)
     map[FB_SETTING_ANIMATION_COOL_OFF_TIMEOUT] = ^id(FBSession *session) {
       return @(FBConfiguration.sharedInstance.animationCoolOffTimeout);
     };
+    map[FB_SETTING_ACCESSIBILITY_DEADLINE] = ^id(FBSession *session) {
+      return @(FBConfiguration.sharedInstance.accessibilityDeadline);
+    };
     map[FB_SETTING_BOUND_ELEMENTS_BY_INDEX] = ^id(FBSession *session) {
       return @(FBConfiguration.sharedInstance.boundElementsByIndex);
     };
@@ -303,7 +310,7 @@ static NSSet<NSString *> *FBNilClearableSettingKeys(void)
     map[FB_SETTING_LIMIT_XPATH_CONTEXT_SCOPE] = ^id(FBSession *session) {
       return @(FBConfiguration.sharedInstance.limitXpathContextScope);
     };
-#if !TARGET_OS_TV
+#if !TARGET_OS_TV && !TARGET_OS_WATCH
     map[FB_SETTING_SCREENSHOT_ORIENTATION] = ^id(FBSession *session) {
       return FBConfiguration.sharedInstance.humanReadableScreenshotOrientation;
     };

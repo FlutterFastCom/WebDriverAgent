@@ -77,32 +77,53 @@
 
 @end
 
+#define TESTMANAGERD_VERSION_TIMEOUT_SEC 20
+
 NSInteger FBTestmanagerdVersion(void)
 {
-  static dispatch_once_t getTestmanagerdVersion;
-  static NSInteger testmanagerdVersion;
-  dispatch_once(&getTestmanagerdVersion, ^{
+  // -1 means "not yet determined". The timeout fallback is cached like any other outcome: the
+  // value is diagnostic-only, and retrying would stall every later /status for the full timeout
+  // against a daemon that never answers.
+  static NSInteger cachedVersion = -1;
+  static dispatch_queue_t syncQueue;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    syncQueue = dispatch_queue_create("com.facebook.wda.testmanagerdVersion", DISPATCH_QUEUE_SERIAL);
+  });
+
+  __block NSInteger result;
+  dispatch_sync(syncQueue, ^{
+    if (cachedVersion >= 0) {
+      result = cachedVersion;
+      return;
+    }
+
     id<XCTMessagingChannel_RunnerToDaemon> proxy = [FBXCTestDaemonsProxy testRunnerProxy];
     if ([(NSObject *)proxy respondsToSelector:@selector(_XCT_exchangeProtocolVersion:reply:)]) {
       id<FBXCTestManagerLegacyProtocolVersionExchanging> legacyProxy = (id<FBXCTestManagerLegacyProtocolVersionExchanging>)proxy;
-      [FBRunLoopSpinner spinUntilCompletion:^(void(^completion)(void)){
-        [legacyProxy _XCT_exchangeProtocolVersion:testmanagerdVersion reply:^(unsigned long long code) {
-          testmanagerdVersion = (NSInteger) code;
-          completion();
-        }];
+      __block NSInteger receivedVersion = -1;
+      dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+      [legacyProxy _XCT_exchangeProtocolVersion:0 reply:^(unsigned long long code) {
+        receivedVersion = (NSInteger) code;
+        dispatch_semaphore_signal(sem);
       }];
+      int64_t timeoutNs = (int64_t)(TESTMANAGERD_VERSION_TIMEOUT_SEC * NSEC_PER_SEC);
+      if (0 != dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, timeoutNs))) {
+        [FBLogger logFmt:@"Did not receive a testmanagerd protocol version reply within %d seconds; assuming the newest/full-featured protocol", TESTMANAGERD_VERSION_TIMEOUT_SEC];
+        result = 0xFFFF;
+      } else {
+        result = receivedVersion;
+      }
     } else {
-      // Modern testmanagerd (Xcode 15+) has already negotiated named XCTCapabilities by the time
-      // a daemon session exists, instead of a single scalar protocol version. There is no direct
-      // integer equivalent to report here (this value is diagnostic-only, surfaced via the
-      // 'testmanagerdVersion' session capability), so keep reporting the existing "assume
-      // newest/full-featured" sentinel, while confirming capabilities did negotiate successfully.
+      // Modern testmanagerd (Xcode 15+) negotiates named XCTCapabilities instead of a scalar
+      // version; there's no direct integer equivalent, so just confirm capabilities negotiated.
       XCTCapabilities *capabilities = [XCTRunnerDaemonSession sharedSession].remoteInterfaceCapabilities;
       if (nil == capabilities) {
         [FBLogger log:@"Could not retrieve testmanagerd capabilities"];
       }
-      testmanagerdVersion = 0xFFFF;
+      result = 0xFFFF;
     }
+    cachedVersion = result;
   });
-  return testmanagerdVersion;
+  return result;
 }
