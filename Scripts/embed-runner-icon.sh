@@ -1,6 +1,6 @@
 #!/bin/bash
 # Embed the WDA app icon into the wrapping XCTRunner host app so the
-# installed WebDriverAgent shows the Appium logo on the iOS home screen
+# installed WebDriverAgent shows the configured app icon on the iOS home screen
 # instead of a blank icon.
 #
 # Apple's USES_XCTRUNNER auto-generates a Runner.app around UI-testing
