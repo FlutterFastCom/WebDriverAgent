@@ -13,4 +13,16 @@ export const PLATFORM_NAME_IOS = 'iOS';
 
 export const SDK_DEVICE = 'iphoneos';
 
+/**
+ * @deprecated The WDA upgrade timestamp path is no longer used.
+ */
 export const WDA_UPGRADE_TIMESTAMP_PATH = path.join('.appium', 'webdriveragent', 'upgrade.time');
+
+/**
+ * Harmless unused build setting override appended to every xcodebuild invocation
+ * this package starts. It has no effect on the build itself, but shows up verbatim
+ * in the process' command line, letting us tell our own xcodebuild processes apart
+ * from unrelated ones (e.g. other WDA-based test runners) that happen to target the
+ * same device udid.
+ */
+export const XCODEBUILD_PROCESS_MARKER = 'APPIUM_XCODEBUILD_WDA_MARKER=1';

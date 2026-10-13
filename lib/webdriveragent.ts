@@ -7,12 +7,7 @@ import type {AppiumLogger, StringRecord} from '@appium/types';
 import AsyncLock from 'async-lock';
 import {waitForCondition} from 'asyncbox';
 
-import {
-  WDA_RUNNER_BUNDLE_ID,
-  WDA_BASE_URL,
-  WDA_UPGRADE_TIMESTAMP_PATH,
-  DEFAULT_TEST_BUNDLE_SUFFIX,
-} from './constants.js';
+import {WDA_RUNNER_BUNDLE_ID, WDA_BASE_URL, DEFAULT_TEST_BUNDLE_SUFFIX} from './constants.js';
 import {log as defaultLogger} from './logger.js';
 import {NoSessionProxy} from './no-session-proxy.js';
 import type {
@@ -584,31 +579,19 @@ export class WebDriverAgent {
 
     const packageInfo = JSON.parse(await fs.readFile(path.join(BOOTSTRAP_PATH, 'package.json'), 'utf8'));
     const box = strongbox(packageInfo.name);
-    let boxItem = box.getItem(RECENT_MODULE_VERSION_ITEM_NAME);
-    if (!boxItem) {
-      const timestampPath = path.resolve(process.env.HOME ?? '', WDA_UPGRADE_TIMESTAMP_PATH);
-      if (await fs.exists(timestampPath)) {
-        // TODO: It is probably a bit ugly to hardcode the recent version string,
-        // TODO: hovewer it should do the job as a temporary transition trick
-        // TODO: to switch from a hardcoded file path to the strongbox usage.
-        try {
-          boxItem = await box.createItemWithValue(RECENT_MODULE_VERSION_ITEM_NAME, '5.0.0');
-        } catch (e: any) {
-          this.log.warn(`The actual module version cannot be persisted: ${e.message}`);
-          return;
-        }
-      } else {
-        this.log.info('There is no need to perform the project cleanup. A fresh install has been detected');
-        try {
-          await box.createItemWithValue(RECENT_MODULE_VERSION_ITEM_NAME, packageInfo.version);
-        } catch (e: any) {
-          this.log.warn(`The actual module version cannot be persisted: ${e.message}`);
-        }
-        return;
+    // Each Strongbox instance starts with an empty item map. Load the persisted value from disk.
+    const boxItem = await box.createItem<string>(RECENT_MODULE_VERSION_ITEM_NAME);
+    let recentModuleVersion = boxItem.value;
+    if (recentModuleVersion === undefined) {
+      this.log.info('There is no need to perform the project cleanup. A fresh install has been detected');
+      try {
+        await boxItem.write(packageInfo.version);
+      } catch (e: any) {
+        this.log.warn(`The actual module version cannot be persisted: ${e.message}`);
       }
+      return;
     }
 
-    let recentModuleVersion = await boxItem.read();
     try {
       recentModuleVersion = util.coerceVersion(recentModuleVersion, true);
     } catch (e: any) {

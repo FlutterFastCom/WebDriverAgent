@@ -9,6 +9,8 @@
 #import "FBElementCommands.h"
 
 #import "FBConfiguration.h"
+#import "FBScreen.h"
+#import "XCUIScreen.h"
 #import "FBKeyboard.h"
 #import "FBRoute.h"
 #import "FBRouteRequest.h"
@@ -22,6 +24,7 @@
 #import "FBRuntimeUtils.h"
 #import "NSPredicate+FBFormat.h"
 #import "XCTestPrivateSymbols.h"
+#import "XCUIApplication+FBTouchAction.h"
 #import "XCUICoordinate.h"
 #import "XCUIDevice.h"
 #import "XCUIElement+FBIsVisible.h"
@@ -353,18 +356,31 @@
 + (id<FBResponsePayload>)handlePressAndDragCoordinateWithVelocity:(FBRouteRequest *)request
 {
   XCUIApplication *application = request.session.activeApplication;
+  NSError *error;
   CGVector startOffset = CGVectorMake((CGFloat)[request.arguments[@"fromX"] doubleValue],
                                      (CGFloat)[request.arguments[@"fromY"] doubleValue]);
   XCUICoordinate *startCoordinate = [self.class gestureCoordinateWithOffset:startOffset
-                                                                    element:application];
+                                                                    element:application
+                                                                      error:&error];
+  if (nil == startCoordinate) {
+    return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
+  }
   CGVector endOffset = CGVectorMake((CGFloat)[request.arguments[@"toX"] doubleValue],
                                     (CGFloat)[request.arguments[@"toY"] doubleValue]);
   XCUICoordinate *endCoordinate = [self.class gestureCoordinateWithOffset:endOffset
-                                                                  element:application];
-  [startCoordinate pressForDuration:[request.arguments[@"pressDuration"] doubleValue]
-               thenDragToCoordinate:endCoordinate
-                       withVelocity:[request.arguments[@"velocity"] doubleValue]
-                thenHoldForDuration:[request.arguments[@"holdDuration"] doubleValue]];
+                                                                  element:application
+                                                                    error:&error];
+  if (nil == endCoordinate) {
+    return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
+  }
+  if (![application fb_pressAtCoordinate:startCoordinate
+                             forDuration:[request.arguments[@"pressDuration"] doubleValue]
+                    thenDragToCoordinate:endCoordinate
+                            withVelocity:[request.arguments[@"velocity"] doubleValue]
+                     thenHoldForDuration:[request.arguments[@"holdDuration"] doubleValue]
+                                   error:&error]) {
+    return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
+  }
   return FBResponseWithOK();
 }
 
@@ -433,14 +449,31 @@
 + (id<FBResponsePayload>)handleDrag:(FBRouteRequest *)request
 {
   XCUIElement *target = [self targetFromRequest:request];
+  NSError *error;
   CGVector startOffset = CGVectorMake([request.arguments[@"fromX"] doubleValue],
                                       [request.arguments[@"fromY"] doubleValue]);
-  XCUICoordinate *startCoordinate = [self.class gestureCoordinateWithOffset:startOffset element:target];
+  XCUICoordinate *startCoordinate = [self.class gestureCoordinateWithOffset:startOffset element:target error:&error];
+  if (nil == startCoordinate) {
+    return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
+  }
   CGVector endOffset = CGVectorMake([request.arguments[@"toX"] doubleValue],
                                     [request.arguments[@"toY"] doubleValue]);
-  XCUICoordinate *endCoordinate = [self.class gestureCoordinateWithOffset:endOffset element:target];
+  XCUICoordinate *endCoordinate = [self.class gestureCoordinateWithOffset:endOffset element:target error:&error];
+  if (nil == endCoordinate) {
+    return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
+  }
   NSTimeInterval duration = [request.arguments[@"duration"] doubleValue];
-  [startCoordinate pressForDuration:duration thenDragToCoordinate:endCoordinate];
+  XCUIApplication *application = [target isKindOfClass:XCUIApplication.class]
+    ? (XCUIApplication *)target
+    : target.application;
+  if (![application fb_pressAtCoordinate:startCoordinate
+                             forDuration:duration
+                    thenDragToCoordinate:endCoordinate
+                            withVelocity:XCUIGestureVelocityDefault
+                     thenHoldForDuration:0
+                                   error:&error]) {
+    return FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.description traceback:nil]);
+  }
   return FBResponseWithOK();
 }
 
@@ -659,12 +692,42 @@ static const NSInteger DEFAULT_MAX_PICKER_ATTEMPTS = 25;
 
  @param offset absolute screen offset for the given application
  @param element the element instance to perform the gesture on
- @return translated gesture coordinates ready to be passed to XCUICoordinate methods
+ @param error Error instance if any
+ @return translated gesture coordinates ready to be passed to XCUICoordinate methods, or
+ nil if the element is not visible on the screen
  */
-+ (XCUICoordinate *)gestureCoordinateWithOffset:(CGVector)offset
-                                        element:(XCUIElement *)element
++ (nullable XCUICoordinate *)gestureCoordinateWithOffset:(CGVector)offset
+                                                  element:(XCUIElement *)element
+                                                    error:(NSError **)error
 {
-  return [[element coordinateWithNormalizedOffset:CGVectorMake(0, 0)] coordinateWithOffset:offset];
+  if (element.elementType != XCUIElementTypeApplication) {
+    return FBCoordinateWithAnchorOffset(element, CGVectorMake(0, 0), offset, error);
+  }
+  XCUIScreen *screen = [FBScreen currentScreenWithError:error];
+  if (nil == screen) {
+    return nil;
+  }
+  if (screen.displayID == XCUIScreen.mainScreen.displayID) {
+    return FBCoordinateWithAnchorOffset(element, CGVectorMake(0, 0), offset, error);
+  }
+  // Application-root coordinates are rotated using the main display on Duo.
+  // A window coordinate keeps XCTest's display affinity and rotation intact.
+  // It is only a coordinate anchor, not a hit-test boundary. Preserve edge and
+  // outside offsets just as on the main display; XCTest handles their delivery.
+  CGPoint point = CGPointMake(offset.dx, offset.dy);
+  for (XCUIElement *window in [element childrenMatchingType:XCUIElementTypeWindow].allElementsBoundByIndex) {
+    // Resolve the window before reading its display affinity: an unresolved
+    // element may report displayID == 0.
+    (void)window.frame;
+    CGRect frame = window.wdFrame;
+    if (window.screen.displayID == screen.displayID && !CGRectIsEmpty(frame)) {
+      return FBCoordinateWithAnchorOffset(window, CGVectorMake(0, 0),
+        CGVectorMake(point.x - frame.origin.x, point.y - frame.origin.y), error);
+    }
+  }
+  [[[FBErrorBuilder builder] withDescriptionFormat:@"No non-empty application window on display %lld is available as a coordinate anchor", screen.displayID]
+    buildError:error];
+  return nil;
 }
 
 /**
@@ -688,7 +751,8 @@ static const NSInteger DEFAULT_MAX_PICKER_ATTEMPTS = 25;
     return nil;
   }
   return [self gestureCoordinateWithOffset:CGVectorMake(x.doubleValue, y.doubleValue)
-                                   element:[self targetFromRequest:request]];
+                                   element:[self targetFromRequest:request]
+                                     error:error];
 }
 
 /**

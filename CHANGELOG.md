@@ -1,3 +1,154 @@
+## [16.15.0](https://github.com/appium/WebDriverAgent/compare/v16.14.2...v16.15.0) (2026-10-12)
+
+### Features
+
+* add asAppUnderTest flag to /wda/apps/launch ([#1289](https://github.com/appium/WebDriverAgent/issues/1289)) ([f5c0688](https://github.com/appium/WebDriverAgent/commit/f5c068873ff6dcd1ce444d26246c102cc379d5bf))
+
+## [16.14.2](https://github.com/appium/WebDriverAgent/compare/v16.14.1...v16.14.2) (2026-10-08)
+
+### Bug Fixes
+
+* align Duo W3C actions and scrolling ([#1288](https://github.com/appium/WebDriverAgent/issues/1288)) ([104a31c](https://github.com/appium/WebDriverAgent/commit/104a31ce9aca53222bb312103f485b59f52f9894)), closes [#1294](https://github.com/appium/WebDriverAgent/issues/1294) [#1292](https://github.com/appium/WebDriverAgent/issues/1292)
+
+## [16.14.1](https://github.com/appium/WebDriverAgent/compare/v16.14.0...v16.14.1) (2026-10-07)
+
+### Bug Fixes
+
+* report geometry for the selected display ([#1291](https://github.com/appium/WebDriverAgent/issues/1291)) ([43fa6da](https://github.com/appium/WebDriverAgent/commit/43fa6da647fb8adca21fdbd106d8f73d782d6717))
+* skip accessibility idle checks for WebKit services ([#1293](https://github.com/appium/WebDriverAgent/issues/1293)) ([9d06611](https://github.com/appium/WebDriverAgent/commit/9d06611d1f5d342fd16458f707dca3f3e3ec00fc))
+
+## [16.14.0](https://github.com/appium/WebDriverAgent/compare/v16.13.6...v16.14.0) (2026-10-04)
+
+### Features
+
+* support Duo hinge control and secondary display capture ([#1287](https://github.com/appium/WebDriverAgent/issues/1287)) ([76d6aa0](https://github.com/appium/WebDriverAgent/commit/76d6aa03e2423290bb05c436afc153bd32878ce0))
+
+## [16.13.6](https://github.com/appium/WebDriverAgent/compare/v16.13.5...v16.13.6) (2026-09-30)
+
+### Bug Fixes
+
+* restore stability wait settings when quiescence throws ([#1281](https://github.com/appium/WebDriverAgent/issues/1281)) ([bcc434c](https://github.com/appium/WebDriverAgent/commit/bcc434c08127c370c0cb05ce1dc9f4cea9f98559))
+
+## [16.13.5](https://github.com/appium/WebDriverAgent/compare/v16.13.4...v16.13.5) (2026-09-30)
+
+### Performance Improvements
+
+* stream page-source XML with exception-safe resource cleanup ([#1276](https://github.com/appium/WebDriverAgent/issues/1276)) ([4e8639b](https://github.com/appium/WebDriverAgent/commit/4e8639bf73f962591e3e7b3be211f289a19ebf84))
+
+## [16.13.4](https://github.com/appium/WebDriverAgent/compare/v16.13.3...v16.13.4) (2026-09-30)
+
+### Performance Improvements
+
+* use native predicates for accessibility id lookups ([#1286](https://github.com/appium/WebDriverAgent/issues/1286)) ([2ceb940](https://github.com/appium/WebDriverAgent/commit/2ceb940939c2033cb37b846962a966d42bb0ddab))
+
+## [16.13.3](https://github.com/appium/WebDriverAgent/compare/v16.13.2...v16.13.3) (2026-09-30)
+
+### Bug Fixes
+
+* reject stale sessions without retaining past responses ([#1282](https://github.com/appium/WebDriverAgent/issues/1282)) ([f245ffb](https://github.com/appium/WebDriverAgent/commit/f245ffb4e6906143384410cf312abc5bcedf5486))
+
+## [16.13.2](https://github.com/appium/WebDriverAgent/compare/v16.13.1...v16.13.2) (2026-09-30)
+
+### Bug Fixes
+
+* process received HTTP bytes before handling EOF ([#1277](https://github.com/appium/WebDriverAgent/issues/1277)) ([203fc4f](https://github.com/appium/WebDriverAgent/commit/203fc4f012ab1d90caf0127fe85f119ad85cb0e8))
+
+## [16.13.1](https://github.com/appium/WebDriverAgent/compare/v16.13.0...v16.13.1) (2026-09-30)
+
+### Performance Improvements
+
+* reuse sibling indices and geometry during XML serialization ([#1283](https://github.com/appium/WebDriverAgent/issues/1283)) ([f352660](https://github.com/appium/WebDriverAgent/commit/f352660deb52728c195a875b4172e38e1a1496b8))
+
+## [16.13.0](https://github.com/appium/WebDriverAgent/compare/v16.12.11...v16.13.0) (2026-09-30)
+
+### Features
+
+* add currentDisplayId setting for screenshots ([#1267](https://github.com/appium/WebDriverAgent/issues/1267)) ([c9366a2](https://github.com/appium/WebDriverAgent/commit/c9366a227b6de19381c96d56a548e9fb53d77dba))
+
+### Bug Fixes
+
+* apply screenshot scaling once when correcting orientation ([#1278](https://github.com/appium/WebDriverAgent/issues/1278)) ([17fd4d0](https://github.com/appium/WebDriverAgent/commit/17fd4d059c351d73384604be40bbade4a03be9a9))
+* avoid infinite-point assertion and hang in coordinate drag gestures ([#1270](https://github.com/appium/WebDriverAgent/issues/1270)) ([c9290a0](https://github.com/appium/WebDriverAgent/commit/c9290a01a63fa195c8aba35c9f0cdad1cd9a6d64)), closes [#1056](https://github.com/appium/WebDriverAgent/issues/1056)
+* cancel connections that end on the client side ([#1273](https://github.com/appium/WebDriverAgent/issues/1273)) ([261c08d](https://github.com/appium/WebDriverAgent/commit/261c08d53917b138eaf2f7d8a744d1151fe3bc8d))
+* isolate xcodebuild readiness state between launches ([#1275](https://github.com/appium/WebDriverAgent/issues/1275)) ([ccc46fe](https://github.com/appium/WebDriverAgent/commit/ccc46fe6de1871a020205488533c1d5b9b7dc756))
+* release LRU cache values when the cache is destroyed ([#1274](https://github.com/appium/WebDriverAgent/issues/1274)) ([fb52865](https://github.com/appium/WebDriverAgent/commit/fb5286515584157659ed86bccdbb64bc3094d91f))
+
+## [16.12.11](https://github.com/appium/WebDriverAgent/compare/v16.12.10...v16.12.11) (2026-09-28)
+
+### Bug Fixes
+
+* embed simulator XCTest dependencies with native copy phase ([#1271](https://github.com/appium/WebDriverAgent/issues/1271)) ([b884dc6](https://github.com/appium/WebDriverAgent/commit/b884dc609fa345bb725123666de5aa0368b34594))
+
+## [16.12.10](https://github.com/appium/WebDriverAgent/compare/v16.12.9...v16.12.10) (2026-09-21)
+
+### Miscellaneous Chores
+
+* remove unused appium-ios-simulator dependency ([#1265](https://github.com/appium/WebDriverAgent/issues/1265)) ([984de59](https://github.com/appium/WebDriverAgent/commit/984de59ee71f84eb83fce0762d394dea261edce0))
+
+## [16.12.9](https://github.com/appium/WebDriverAgent/compare/v16.12.8...v16.12.9) (2026-09-19)
+
+### Bug Fixes
+
+* resolve real device udid to xcodebuild's own case before building '-destination id=' ([#1260](https://github.com/appium/WebDriverAgent/issues/1260)) ([c220f4d](https://github.com/appium/WebDriverAgent/commit/c220f4d92a70761e0fe1df936740cc04d9bafdc4))
+
+## [16.12.8](https://github.com/appium/WebDriverAgent/compare/v16.12.7...v16.12.8) (2026-09-11)
+
+### Bug Fixes
+
+* use wdFrame instead of raw frame for scroll gesture anchor ([#1256](https://github.com/appium/WebDriverAgent/issues/1256)) ([9ada9fd](https://github.com/appium/WebDriverAgent/commit/9ada9fd4077796b7c1002292c21ec9e45fab4d89))
+
+## [16.12.7](https://github.com/appium/WebDriverAgent/compare/v16.12.6...v16.12.7) (2026-09-10)
+
+### Bug Fixes
+
+* remaining strong box file ([#1255](https://github.com/appium/WebDriverAgent/issues/1255)) ([f5f7004](https://github.com/appium/WebDriverAgent/commit/f5f70041e463777d7604e84fd8d27bf11cb268b9))
+
+## [16.12.6](https://github.com/appium/WebDriverAgent/compare/v16.12.5...v16.12.6) (2026-09-09)
+
+### Bug Fixes
+
+* rescale gesture coordinates for compatibility-mode window mismatches ([#1249](https://github.com/appium/WebDriverAgent/issues/1249)) ([25fcd95](https://github.com/appium/WebDriverAgent/commit/25fcd9558314c367c755b047cd0db0949654e90b))
+
+## [16.12.5](https://github.com/appium/WebDriverAgent/compare/v16.12.4...v16.12.5) (2026-09-07)
+
+### Bug Fixes
+
+* touch and scroll related view issue in IntegrationApp ([#1253](https://github.com/appium/WebDriverAgent/issues/1253)) ([34859e9](https://github.com/appium/WebDriverAgent/commit/34859e9b443c184505206576b3b531d85d2afbcf))
+
+## [16.12.4](https://github.com/appium/WebDriverAgent/compare/v16.12.3...v16.12.4) (2026-09-06)
+
+### Miscellaneous Chores
+
+* add coordinate screen in the integration app ([#1251](https://github.com/appium/WebDriverAgent/issues/1251)) ([de6acac](https://github.com/appium/WebDriverAgent/commit/de6acac7ebbaf70915f0c09093e3a12623efcea2))
+
+## [16.12.3](https://github.com/appium/WebDriverAgent/compare/v16.12.2...v16.12.3) (2026-09-04)
+
+### Bug Fixes
+
+* resolve key name lookup for dictionary-form keyboardInput keys ([#1247](https://github.com/appium/WebDriverAgent/issues/1247)) ([f40bac6](https://github.com/appium/WebDriverAgent/commit/f40bac6ea77f6220883fe4437ee63e51fe44d74f))
+
+## [16.12.2](https://github.com/appium/WebDriverAgent/compare/v16.12.1...v16.12.2) (2026-09-03)
+
+### Bug Fixes
+
+* allow pause action items to appear before any pointer movement ([#1246](https://github.com/appium/WebDriverAgent/issues/1246)) ([282478a](https://github.com/appium/WebDriverAgent/commit/282478a2e631501fd904b0675717123c779d9b84))
+
+## [16.12.1](https://github.com/appium/WebDriverAgent/compare/v16.12.0...v16.12.1) (2026-09-01)
+
+### Miscellaneous Chores
+
+* bump support-related dependencies ([#1245](https://github.com/appium/WebDriverAgent/issues/1245)) ([3ff08a6](https://github.com/appium/WebDriverAgent/commit/3ff08a64b2428bbc81aef1dece492f49e273d702))
+
+## [16.12.0](https://github.com/appium/WebDriverAgent/compare/v16.11.4...v16.12.0) (2026-09-01)
+
+### Features
+
+* add get screens endpoint ([#1242](https://github.com/appium/WebDriverAgent/issues/1242)) ([55808de](https://github.com/appium/WebDriverAgent/commit/55808de21df801c69991cd0de66ee7eeaac3407e))
+
+### Bug Fixes
+
+* scope xcodebuild process kill to this package's own processes ([#1244](https://github.com/appium/WebDriverAgent/issues/1244)) ([988f309](https://github.com/appium/WebDriverAgent/commit/988f3097876f627a48b38a242958c755c429db95))
+
 ## [16.11.4](https://github.com/appium/WebDriverAgent/compare/v16.11.3...v16.11.4) (2026-08-30)
 
 ### Bug Fixes

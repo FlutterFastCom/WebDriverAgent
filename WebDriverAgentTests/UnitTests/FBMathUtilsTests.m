@@ -110,4 +110,87 @@
   XCTAssertTrue(FBSizeFuzzyEqualToSize(screenSizeLandscape, FBAdjustDimensionsForApplication(screenSizeLandscape, UIInterfaceOrientationLandscapeRight), t));
 }
 
+- (void)testScrollGestureOffsetsWithMatchingFrames
+{
+  CGRect frame = CGRectMake(20, 200, 300, 400);
+  CGVector proportion = CGVectorMake(0.5, 0.75);
+  CGVector vector = CGVectorMake(0, -200);
+  CGVector startOffset, endOffset;
+  XCTAssertTrue(FBScrollGestureOffsets(frame, frame, proportion, vector, &startOffset, &endOffset));
+  XCTAssertTrue(FBVectorFuzzyEqualToVector(startOffset, CGVectorMake(0.5, 0.75), 0.01));
+  XCTAssertTrue(FBVectorFuzzyEqualToVector(endOffset, CGVectorMake(0.5, 0.25), 0.01));
+}
+
+- (void)testScrollGestureOffsetsWithRescaledAnchorFrame
+{
+  // Simulates a compatibility-mode window: anchorFrame is scrollingFrame scaled by ~2.19x,
+  // same origin - offsets should still land within [0, 1] instead of drifting outside it.
+  CGRect scrollingFrame = CGRectMake(20, 202, 335, 420);
+  CGRect anchorFrame = CGRectMake(20, 202, 733, 920);
+  CGVector proportion = CGVectorMake(0.5, 0.75);
+  CGVector vector = CGVectorMake(0, -250);
+  CGVector startOffset, endOffset;
+  XCTAssertTrue(FBScrollGestureOffsets(scrollingFrame, anchorFrame, proportion, vector, &startOffset, &endOffset));
+  XCTAssertTrue(startOffset.dx >= 0 && startOffset.dx <= 1);
+  XCTAssertTrue(startOffset.dy >= 0 && startOffset.dy <= 1);
+  XCTAssertTrue(endOffset.dx >= 0 && endOffset.dx <= 1);
+  XCTAssertTrue(endOffset.dy >= 0 && endOffset.dy <= 1);
+}
+
+- (void)testScrollGestureOffsetsWithEmptyFrame
+{
+  CGVector startOffset = CGVectorMake(-1, -1);
+  CGVector endOffset = CGVectorMake(-1, -1);
+  XCTAssertFalse(FBScrollGestureOffsets(CGRectZero, CGRectMake(0, 0, 100, 100), CGVectorMake(0.5, 0.5), CGVectorMake(0, -50), &startOffset, &endOffset));
+  XCTAssertFalse(FBScrollGestureOffsets(CGRectMake(0, 0, 100, 100), CGRectZero, CGVectorMake(0.5, 0.5), CGVectorMake(0, -50), &startOffset, &endOffset));
+  // Untouched on failure
+  XCTAssertTrue(startOffset.dx == -1 && startOffset.dy == -1);
+  XCTAssertTrue(endOffset.dx == -1 && endOffset.dy == -1);
+}
+
+- (void)testDisplayCoordinateOffsets
+{
+  CGSize mainSize = CGSizeMake(402, 874);
+  CGSize innerSize = CGSizeMake(669, 951);
+  NSArray<NSNumber *> *orientations = @[
+    @(UIInterfaceOrientationPortrait),
+    @(UIInterfaceOrientationLandscapeLeft),
+    @(UIInterfaceOrientationLandscapeRight),
+    @(UIInterfaceOrientationPortraitUpsideDown),
+  ];
+  NSArray<NSValue *> *expected = @[
+    [NSValue valueWithCGPoint:CGPointZero],
+    [NSValue valueWithCGPoint:CGPointMake(0, 77)],
+    [NSValue valueWithCGPoint:CGPointMake(267, 0)],
+    [NSValue valueWithCGPoint:CGPointMake(267, 77)],
+  ];
+  for (NSUInteger i = 0; i < orientations.count; i++) {
+    UIInterfaceOrientation orientation = orientations[i].integerValue;
+    CGVector offset = FBDisplayCoordinateOffset(mainSize, innerSize, orientation);
+    XCTAssertEqual(offset.dx, expected[i].CGPointValue.x);
+    XCTAssertEqual(offset.dy, expected[i].CGPointValue.y);
+    CGVector sameDisplay = FBDisplayCoordinateOffset(mainSize, mainSize, orientation);
+    XCTAssertEqual(sameDisplay.dx, 0);
+    XCTAssertEqual(sameDisplay.dy, 0);
+    CGVector reverse = FBDisplayCoordinateOffset(innerSize, mainSize, orientation);
+    XCTAssertEqual(reverse.dx, -expected[i].CGPointValue.x);
+    XCTAssertEqual(reverse.dy, -expected[i].CGPointValue.y);
+  }
+}
+
+- (void)testPortraitVisibleFrameRotation
+{
+  CGSize size = CGSizeMake(669, 951);
+  CGRect clipped = CGRectMake(200, 100, 300, 400);
+  XCTAssertTrue(CGRectEqualToRect(FBRectFromPortraitCoordinates(clipped, size, UIInterfaceOrientationPortrait), clipped));
+  XCTAssertTrue(CGRectEqualToRect(FBRectFromPortraitCoordinates(clipped, size, UIInterfaceOrientationLandscapeLeft), CGRectMake(451, 200, 400, 300)));
+  XCTAssertTrue(CGRectEqualToRect(FBRectFromPortraitCoordinates(clipped, size, UIInterfaceOrientationLandscapeRight), CGRectMake(100, 169, 400, 300)));
+  XCTAssertTrue(CGRectEqualToRect(FBRectFromPortraitCoordinates(clipped, size, UIInterfaceOrientationPortraitUpsideDown), CGRectMake(169, 451, 300, 400)));
+  // Observed on Duo's inner landscape display: keep the clipping in the same
+  // coordinate space as the element's reported frame.
+  XCTAssertTrue(CGRectEqualToRect(FBRectFromPortraitCoordinates(CGRectMake(236, 104, 379, 827), size, UIInterfaceOrientationLandscapeLeft), CGRectMake(20, 236, 827, 379)));
+  XCTAssertTrue(CGRectIsEmpty(FBRectFromPortraitCoordinates(CGRectZero, size, UIInterfaceOrientationLandscapeLeft)));
+  XCTAssertTrue(CGRectIsNull(FBRectFromPortraitCoordinates(CGRectNull, size, UIInterfaceOrientationLandscapeLeft)));
+}
+
 @end

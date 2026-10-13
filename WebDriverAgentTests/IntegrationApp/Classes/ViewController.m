@@ -7,6 +7,11 @@
  */
 
 #import "ViewController.h"
+#import "FBCoordinateProbeViewController.h"
+
+#if !TARGET_OS_TV
+#import <WebKit/WebKit.h>
+#endif
 
 @interface ViewController ()
 @property (weak, nonatomic) IBOutlet UILabel *orentationLabel;
@@ -18,6 +23,17 @@
 - (void)viewDidLoad
 {
   [super viewDidLoad];
+
+#if !TARGET_OS_TV
+  if ([NSProcessInfo.processInfo.arguments containsObject:@"--webview-fixture"]) {
+    WKWebView *webView = [[WKWebView alloc] initWithFrame:self.view.bounds];
+    webView.autoresizingMask = UIViewAutoresizingFlexibleWidth
+      | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:webView];
+    [webView loadHTMLString:@"<!doctype html><html><body>"
+      "<p>WebContent snapshot fixture</p></body></html>" baseURL:nil];
+  }
+#endif
   
   UIAccessibilityCustomAction *action1 =
   [[UIAccessibilityCustomAction alloc] initWithName:@"Custom Action 1"
@@ -28,6 +44,11 @@
                                              target:self
                                            selector:@selector(handleCustomAction:)];
   self.button.accessibilityCustomActions = @[action1, action2];
+}
+
+- (IBAction)showCoordinateProbe:(id)sender
+{
+  [self.navigationController pushViewController:[FBCoordinateProbeViewController new] animated:NO];
 }
 
 - (BOOL)handleCustomAction:(UIAccessibilityCustomAction *)action
@@ -57,13 +78,13 @@
   // lay out. This page exists purely as a fixture for exercising element
   // lookups (e.g. class chain locators) against a deep accessibility tree.
   UIViewController *deepHierarchyViewController = [UIViewController new];
-  deepHierarchyViewController.view.backgroundColor = UIColor.whiteColor;
+  deepHierarchyViewController.view.backgroundColor = UIColor.systemBackgroundColor;
   deepHierarchyViewController.view.accessibilityIdentifier = @"DeepHierarchyPage";
 
   NSInteger depth = 70;
   // A plain UILabel sibling, not part of the nested chain below, so the
   // fixture stays recognizable to a human glancing at the simulator instead
-  // of showing a blank white screen.
+  // of showing a blank screen.
   UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 60, CGRectGetWidth(UIScreen.mainScreen.bounds) - 40, 60)];
   titleLabel.text = [NSString stringWithFormat:@"Deep Hierarchy\n%ld nested elements", (long)depth];
   titleLabel.numberOfLines = 2;

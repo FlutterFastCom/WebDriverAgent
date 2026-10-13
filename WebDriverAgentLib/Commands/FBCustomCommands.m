@@ -29,10 +29,12 @@
 #import "XCUIApplication.h"
 #import "XCUIApplication+FBHelpers.h"
 #import "XCUIDevice+FBHelpers.h"
+#import "XCUIDevice+FBHinge.h"
 #import "XCUIDevice+FBVoiceOver.h"
 #import "XCUIElement.h"
 #import "XCUIElement+FBIsVisible.h"
 #import "XCUIElementQuery.h"
+#import "XCUIScreen.h"
 #import "FBUnattachedAppLauncher.h"
 
 @implementation FBCustomCommands
@@ -53,6 +55,8 @@
     [[FBRoute GET:@"/wda/locked"] respondWithTarget:self action:@selector(handleIsLocked:)],
     [[FBRoute GET:@"/wda/screen"] respondWithTarget:self action:@selector(handleGetScreen:)],
     [[FBRoute GET:@"/wda/screen"].withoutSession respondWithTarget:self action:@selector(handleGetScreen:)],
+    [[FBRoute GET:@"/wda/screens"].standalone respondWithTarget:self action:@selector(handleGetScreens:)],
+    [[FBRoute GET:@"/wda/screens"].withoutSession.standalone respondWithTarget:self action:@selector(handleGetScreens:)],
     [[FBRoute GET:@"/wda/activeAppInfo"] respondWithTarget:self action:@selector(handleActiveAppInfo:)],
     [[FBRoute GET:@"/wda/activeAppInfo"].withoutSession respondWithTarget:self action:@selector(handleActiveAppInfo:)],
 #if !TARGET_OS_TV && !TARGET_OS_WATCH // tvOS/watchOS do not provide relevant APIs
@@ -72,6 +76,10 @@
     [[FBRoute POST:@"/wda/expectNotification"] respondWithTarget:self action:@selector(handleExpectNotification:)],
     [[FBRoute POST:@"/wda/siri/activate"] respondWithTarget:self action:@selector(handleActivateSiri:)],
     [[FBRoute POST:@"/wda/apps/launchUnattached"].withoutSession respondWithTarget:self action:@selector(handleLaunchUnattachedApp:)],
+    [[FBRoute GET:@"/wda/device/hingeAngle"] respondWithTarget:self action:@selector(handleGetSimulatedHingeAngle:)],
+    [[FBRoute GET:@"/wda/device/hingeAngle"].withoutSession respondWithTarget:self action:@selector(handleGetSimulatedHingeAngle:)],
+    [[FBRoute POST:@"/wda/device/hingeAngle"] respondWithTarget:self action:@selector(handleSetSimulatedHingeAngle:)],
+    [[FBRoute POST:@"/wda/device/hingeAngle"].withoutSession respondWithTarget:self action:@selector(handleSetSimulatedHingeAngle:)],
     [[FBRoute GET:@"/wda/device/info"] respondWithTarget:self action:@selector(handleGetDeviceInfo:)],
     [[FBRoute POST:@"/wda/resetAppAuth"] respondWithTarget:self action:@selector(handleResetAppAuth:)],
     [[FBRoute GET:@"/wda/device/info"].withoutSession respondWithTarget:self action:@selector(handleGetDeviceInfo:)],
@@ -155,16 +163,47 @@
 
 + (id<FBResponsePayload>)handleGetScreen:(FBRouteRequest *)request
 {
+  NSError *error = nil;
+  XCUIScreen *screen = [FBScreen currentScreenWithError:&error];
+  if (nil == screen) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:error.localizedDescription
+                                                                     traceback:nil]);
+  }
   XCUIApplication *app = XCUIApplication.fb_systemApplication;
-
-  XCUIElement *mainStatusBar = app.statusBars.allElementsBoundByIndex.firstObject;
-  CGSize statusBarSize = (nil == mainStatusBar) ? CGSizeZero : mainStatusBar.frame.size;
-
-#if TARGET_OS_TV || TARGET_OS_WATCH
-  CGSize screenSize = app.frame.size;
-#else
-  CGSize screenSize = FBAdjustDimensionsForApplication(app.wdFrame.size, app.interfaceOrientation);
+  CGSize screenSize = CGSizeMake(CGRectGetWidth(screen.bounds) / screen.scale,
+                                 CGRectGetHeight(screen.bounds) / screen.scale);
+#if !TARGET_OS_TV && !TARGET_OS_WATCH
+  XCUIApplication *activeApp = request.session ? request.session.activeApplication : XCUIApplication.fb_activeApplication;
+  UIInterfaceOrientation orientation = activeApp.interfaceOrientation;
+  // Screen bounds describe the panel's native orientation. Some physical iPads
+  // expose landscape-native bounds even while the application is in portrait.
+  // Normalize the full screen separately from compatibility-mode app frames.
+  if (UIInterfaceOrientationIsPortrait(orientation) && screenSize.width > screenSize.height) {
+    screenSize = CGSizeMake(screenSize.height, screenSize.width);
+  }
+  screenSize = FBAdjustDimensionsForApplication(screenSize, orientation);
 #endif
+
+  // SpringBoard can expose hidden status bars belonging to other displays, and
+  // Duo also exposes full-screen containers for its side-mounted status UI.
+  // Only a visible horizontal bar at the top of this display can be subtracted
+  // from a rectangular viewport.
+  CGSize statusBarSize = CGSizeZero;
+  for (XCUIElement *statusBar in app.statusBars.allElementsBoundByIndex) {
+    // Resolve the element before reading its screen: displayID can be zero on
+    // an unresolved query result even when the bar belongs to the main screen.
+    CGRect frame = statusBar.frame;
+    if (statusBar.screen.displayID != screen.displayID || !statusBar.fb_isVisible) {
+      continue;
+    }
+    if (fabs(CGRectGetMinY(frame)) <= 1 && fabs(CGRectGetMinX(frame)) <= 1
+        && fabs(CGRectGetWidth(frame) - screenSize.width) <= 1
+        && CGRectGetHeight(frame) > 0 && CGRectGetHeight(frame) < screenSize.height
+        && CGRectGetHeight(frame) < CGRectGetWidth(frame)) {
+      statusBarSize = frame.size;
+      break;
+    }
+  }
 
   return FBResponseWithObject(
                               @{
@@ -174,9 +213,19 @@
     @"statusBarSize": @{@"width": @(statusBarSize.width),
                         @"height": @(statusBarSize.height),
     },
-    @"displayId": @([FBScreen displayID]),
-    @"scale": @([FBScreen scale]),
+    @"displayId": @(screen.displayID),
+    @"scale": @(screen.scale),
   });
+}
+
++ (id<FBResponsePayload>)handleGetScreens:(FBRouteRequest *)request
+{
+  NSError *error;
+  NSArray<NSDictionary<NSString *, id> *> *screens = [FBScreen screensWithError:&error];
+  if (nil == screens) {
+    return FBResponseWithUnknownError(error);
+  }
+  return FBResponseWithObject(screens);
 }
 
 + (id<FBResponsePayload>)handleLock:(FBRouteRequest *)request
@@ -664,7 +713,7 @@
       if ([modifiers isKindOfClass:NSNumber.class]) {
         modifierFlags = [(NSNumber *)modifiers unsignedIntValue];
       }
-      NSString *keyValue = [FBKeyboard keyValueForName:item] ?: key;
+      NSString *keyValue = [FBKeyboard keyValueForName:key] ?: key;
       [destination typeKey:keyValue modifierFlags:(XCUIKeyModifierFlags)modifierFlags];
     } else {
       NSString *message = @"All items of the 'keys' array must be either dictionaries or strings";
@@ -763,6 +812,37 @@
                                                                traceback:nil]);
   }
   return FBResponseWithObject(result);
+}
+
++ (id<FBResponsePayload>)handleGetSimulatedHingeAngle:(FBRouteRequest *)request
+{
+  if (!XCUIDevice.sharedDevice.fb_supportsHingeAngleReading) {
+    return FBResponseWithStatus([FBCommandStatus unsupportedOperationErrorWithMessage:
+      @"Hinge angle reading is unavailable on this device" traceback:nil]);
+  }
+  NSError *error;
+  NSNumber *angle = [XCUIDevice.sharedDevice fb_getSimulatedHingeAngle:&error];
+  return nil == angle ? FBResponseWithUnknownError(error) : FBResponseWithObject(angle);
+}
+
++ (id<FBResponsePayload>)handleSetSimulatedHingeAngle:(FBRouteRequest *)request
+{
+  id angle = request.arguments[@"angle"];
+  if (![angle isKindOfClass:NSNumber.class]
+      || CFGetTypeID((__bridge CFTypeRef)angle) == CFBooleanGetTypeID()
+      || !isfinite([angle doubleValue]) || [angle doubleValue] < 0 || [angle doubleValue] > 180) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:
+      @"'angle' must be a finite number between 0 and 180 degrees" traceback:nil]);
+  }
+  if (!XCUIDevice.sharedDevice.fb_canAttemptSimulatedHingeAngleInjection) {
+    return FBResponseWithStatus([FBCommandStatus unsupportedOperationErrorWithMessage:
+      @"Setting a simulated hinge angle requires a compatible foldable device" traceback:nil]);
+  }
+  NSError *error;
+  if (![XCUIDevice.sharedDevice fb_setSimulatedHingeAngle:[angle doubleValue] error:&error]) {
+    return FBResponseWithUnknownError(error);
+  }
+  return FBResponseWithOK();
 }
 
 @end

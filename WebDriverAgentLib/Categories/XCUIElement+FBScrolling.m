@@ -9,15 +9,20 @@
 #import "XCUIElement+FBScrolling.h"
 
 #import "FBErrorBuilder.h"
+#import "FBExceptions.h"
 #import "FBLogger.h"
+#import "FBScreen.h"
 #import "FBMacros.h"
 #import "FBMathUtils.h"
 #import "FBXCodeCompatibility.h"
 #import "FBXCElementSnapshotWrapper.h"
 #import "FBXCElementSnapshotWrapper+Helpers.h"
 #import "XCUIElement+FBCaching.h"
+#import "XCUIElement+FBResolve.h"
+#import "XCUIElement+FBUID.h"
 #import "XCUIApplication.h"
 #import "XCUICoordinate.h"
+#import "XCUIScreen.h"
 #import "XCUIElement+FBIsVisible.h"
 #import "XCUIElement+FBVisibleFrame.h"
 #import "XCUIElement.h"
@@ -33,16 +38,64 @@ const CGFloat FBScrollTouchProportion = 0.75f;
 
 #if !TARGET_OS_TV
 
+static void FBValidateScreenForScrolling(void)
+{
+  NSError *error = nil;
+  XCUIScreen *screen = [FBScreen currentScreenWithError:&error];
+  if (nil == screen) {
+    // Match active-app detection: never continue on a different coordinate space
+    // when the selected display is unavailable, including for void scroll APIs.
+    @throw [NSException exceptionWithName:FBInvalidArgumentException
+                                  reason:error.localizedDescription
+                                userInfo:nil];
+  }
+}
+
+static CGRect FBScrollFrameInApplication(CGRect frame, XCUIScreen *screen,
+                                        XCUIApplication *application)
+{
+#if !TARGET_OS_WATCH
+  // XCTest's visibleFrame is in portrait screen coordinates on both main and
+  // secondary displays. The live anchor's frame uses the app's orientation.
+  CGSize size = CGSizeMake(CGRectGetWidth(screen.bounds) / screen.scale,
+                           CGRectGetHeight(screen.bounds) / screen.scale);
+  frame = FBRectFromPortraitCoordinates(frame, size, application.interfaceOrientation);
+#endif
+  return frame;
+}
+
 @interface FBXCElementSnapshotWrapper (FBScrolling)
 
-- (void)fb_scrollUpByNormalizedDistance:(CGFloat)distance inApplication:(XCUIApplication *)application;
-- (void)fb_scrollDownByNormalizedDistance:(CGFloat)distance inApplication:(XCUIApplication *)application;
-- (void)fb_scrollLeftByNormalizedDistance:(CGFloat)distance inApplication:(XCUIApplication *)application;
-- (void)fb_scrollRightByNormalizedDistance:(CGFloat)distance inApplication:(XCUIApplication *)application;
-- (BOOL)fb_scrollByNormalizedVector:(CGVector)normalizedScrollVector inApplication:(XCUIApplication *)application;
-- (BOOL)fb_scrollByVector:(CGVector)vector inApplication:(XCUIApplication *)application error:(NSError **)error;
+- (BOOL)fb_scrollUpByNormalizedDistance:(CGFloat)distance anchorElement:(XCUIElement *)anchorElement;
+- (BOOL)fb_scrollDownByNormalizedDistance:(CGFloat)distance anchorElement:(XCUIElement *)anchorElement;
+- (BOOL)fb_scrollLeftByNormalizedDistance:(CGFloat)distance anchorElement:(XCUIElement *)anchorElement;
+- (BOOL)fb_scrollRightByNormalizedDistance:(CGFloat)distance anchorElement:(XCUIElement *)anchorElement;
+- (BOOL)fb_scrollByNormalizedVector:(CGVector)normalizedScrollVector anchorElement:(XCUIElement *)anchorElement error:(NSError **)error;
+- (BOOL)fb_scrollByVector:(CGVector)vector inFrame:(CGRect)frame anchorElement:(XCUIElement *)anchorElement velocity:(CGFloat)velocity error:(NSError **)error;
 
 @end
+
+/**
+ Resolves a live element for the given snapshot, so gesture coordinates can be anchored
+ to it (its frame gets rescaled by XCTest for compatibility-mode windows; a raw
+ XCUIApplication anchor never does - see appium/appium#16185). Returns nil, rather than
+ falling back to the application, if the snapshot can no longer be located: anchoring to
+ the application would silently reproduce the very bug this is fixing.
+ */
+static XCUIElement *FBLiveElementForSnapshot(id<FBXCElementSnapshot> snapshot, XCUIApplication *application)
+{
+  NSString *uid = [FBXCElementSnapshotWrapper wdUIDWithSnapshot:snapshot];
+  if (nil == uid) {
+    return nil;
+  }
+  XCUIElement *result;
+  @autoreleasepool {
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"%K = %@", FBStringify(FBXCElementSnapshotWrapper, fb_uid), uid];
+    result = [[application.fb_query descendantsMatchingType:XCUIElementTypeAny] matchingPredicate:predicate].allElementsBoundByIndex.firstObject;
+  }
+  result.fb_isResolvedNatively = @NO;
+  return result;
+}
 
 @implementation XCUIElement (FBScrolling)
 
@@ -61,28 +114,28 @@ const CGFloat FBScrollTouchProportion = 0.75f;
 {
   id<FBXCElementSnapshot> snapshot = [self fb_customSnapshot];
   [[FBXCElementSnapshotWrapper ensureWrapped:snapshot] fb_scrollUpByNormalizedDistance:distance
-                                                                         inApplication:self.application];
+                                                                         anchorElement:self];
 }
 
 - (void)fb_scrollDownByNormalizedDistance:(CGFloat)distance
 {
   id<FBXCElementSnapshot> snapshot = [self fb_customSnapshot];
   [[FBXCElementSnapshotWrapper ensureWrapped:snapshot] fb_scrollDownByNormalizedDistance:distance
-                                                                           inApplication:self.application];
+                                                                           anchorElement:self];
 }
 
 - (void)fb_scrollLeftByNormalizedDistance:(CGFloat)distance
 {
   id<FBXCElementSnapshot> snapshot = [self fb_customSnapshot];
   [[FBXCElementSnapshotWrapper ensureWrapped:snapshot] fb_scrollLeftByNormalizedDistance:distance
-                                                                           inApplication:self.application];
+                                                                           anchorElement:self];
 }
 
 - (void)fb_scrollRightByNormalizedDistance:(CGFloat)distance
 {
   id<FBXCElementSnapshot> snapshot = [self fb_customSnapshot];
   [[FBXCElementSnapshotWrapper ensureWrapped:snapshot] fb_scrollRightByNormalizedDistance:distance
-                                                                            inApplication:self.application];
+                                                                            anchorElement:self];
 }
 
 - (BOOL)fb_scrollToVisibleWithError:(NSError **)error
@@ -102,6 +155,9 @@ const CGFloat FBScrollTouchProportion = 0.75f;
                                        scrollDirection:(FBXCUIElementScrollDirection)scrollDirection
                                                  error:(NSError **)error
 {
+  if (nil == [FBScreen currentScreenWithError:error]) {
+    return NO;
+  }
   FBXCElementSnapshotWrapper *prescrollSnapshot = [FBXCElementSnapshotWrapper ensureWrapped:[self fb_customSnapshot]];
 
   if (prescrollSnapshot.isWDVisible) {
@@ -176,29 +232,44 @@ const CGFloat FBScrollTouchProportion = 0.75f;
     }
   }
 
+  // The scroll view's own identity is stable across scroll steps, so it only needs
+  // to be resolved to a live element once, up front; its frame does not, since it can
+  // change across scroll steps (keyboard or dynamic layout).
+  XCUIElement *scrollViewElement = FBLiveElementForSnapshot(scrollView, self.application);
+  if (nil == scrollViewElement) {
+    return
+    [[[FBErrorBuilder builder]
+      withDescriptionFormat:@"Failed to resolve a live element for the scrollable parent of '%@'", self.description]
+     buildError:error];
+  }
+
   const NSUInteger maxScrollCount = 25;
   NSUInteger scrollCount = 0;
-  FBXCElementSnapshotWrapper *scrollViewWrapped = [FBXCElementSnapshotWrapper ensureWrapped:scrollView];
+  FBXCElementSnapshotWrapper *scrollViewWrapped;
   // Scrolling till cell is visible and get current value of frames
   while (![self fb_isEquivalentElementSnapshotVisible:prescrollSnapshot] && scrollCount < maxScrollCount) {
+    BOOL didScroll;
+    __strong NSError *scrollError = nil;
     @autoreleasepool {
-      if (targetCellIndex < visibleCellIndex) {
-        scrollDirection == FBXCUIElementScrollDirectionVertical ?
-          [scrollViewWrapped fb_scrollUpByNormalizedDistance:normalizedScrollDistance
-                                               inApplication:self.application] :
-          [scrollViewWrapped fb_scrollLeftByNormalizedDistance:normalizedScrollDistance
-                                                 inApplication:self.application];
-      }
-      else {
-        scrollDirection == FBXCUIElementScrollDirectionVertical ?
-          [scrollViewWrapped fb_scrollDownByNormalizedDistance:normalizedScrollDistance
-                                                 inApplication:self.application] :
-          [scrollViewWrapped fb_scrollRightByNormalizedDistance:normalizedScrollDistance
-                                                  inApplication:self.application];
-      }
+      scrollViewWrapped = [FBXCElementSnapshotWrapper ensureWrapped:[scrollViewElement fb_customSnapshot]];
+      CGFloat distance = targetCellIndex < visibleCellIndex ? normalizedScrollDistance : -normalizedScrollDistance;
+      CGVector vector = scrollDirection == FBXCUIElementScrollDirectionVertical
+        ? CGVectorMake(0, distance) : CGVectorMake(distance, 0);
+      NSError *stepError = nil;
+      didScroll = [scrollViewWrapped fb_scrollByNormalizedVector:vector
+                                                   anchorElement:scrollViewElement
+                                                           error:&stepError];
+      scrollError = stepError;
       scrollCount++;
       // Wait for scroll animation
       [self fb_waitUntilStableWithTimeout:FBConfiguration.sharedInstance.animationCoolOffTimeout];
+    }
+    // The `error` out-param must not be written from inside the autorelease pool above.
+    if (!didScroll) {
+      if (error) {
+        *error = scrollError;
+      }
+      return NO;
     }
   }
 
@@ -214,13 +285,39 @@ const CGFloat FBScrollTouchProportion = 0.75f;
   // Trying fb_cachedSnapshot first
   FBXCElementSnapshotWrapper *targetCellSnapshotWrapped = [FBXCElementSnapshotWrapper ensureWrapped:[self fb_customSnapshot]];
   targetCellSnapshot = [targetCellSnapshotWrapped fb_parentCellSnapshot];
-  CGRect visibleFrame = [FBXCElementSnapshotWrapper ensureWrapped:targetCellSnapshot].fb_visibleFrame;
-  
-  CGVector scrollVector = CGVectorMake(visibleFrame.size.width - targetCellSnapshot.frame.size.width,
-                                       visibleFrame.size.height - targetCellSnapshot.frame.size.height
-                                       );
+  XCUIScreen *screen = [FBScreen currentScreenWithError:error];
+  if (nil == screen) {
+    return NO;
+  }
+  CGRect visibleFrame = FBScrollFrameInApplication(
+    [FBXCElementSnapshotWrapper ensureWrapped:targetCellSnapshot].fb_visibleFrame, screen, self.application);
+
+  CGRect targetFrame = targetCellSnapshot.frame;
+  // A cell can be clipped at the leading edge after a drag. Move back toward
+  // that edge instead of always scrolling down/right and hiding it further.
+  CGVector scrollVector = CGVectorMake(
+    CGRectGetMinX(visibleFrame) > CGRectGetMinX(targetFrame)
+      ? CGRectGetMinX(visibleFrame) - CGRectGetMinX(targetFrame)
+      : CGRectGetMaxX(visibleFrame) - CGRectGetMaxX(targetFrame),
+    CGRectGetMinY(visibleFrame) > CGRectGetMinY(targetFrame)
+      ? CGRectGetMinY(visibleFrame) - CGRectGetMinY(targetFrame)
+      : CGRectGetMaxY(visibleFrame) - CGRectGetMaxY(targetFrame));
+  // UIKit consumes the start of a drag before recognizing a pan. Include that
+  // margin so a small clipped edge is actually moved into view.
+  if (fabs(scrollVector.dx) > 1) {
+    scrollVector.dx += copysign(FBFuzzyPointThreshold, scrollVector.dx);
+  }
+  if (fabs(scrollVector.dy) > 1) {
+    scrollVector.dy += copysign(FBFuzzyPointThreshold, scrollVector.dy);
+  }
+  // Short fast corrections can turn into a flick and overshoot the target.
+  CGFloat velocity = MIN(FBTouchVelocity, MAX(fabs(scrollVector.dx), fabs(scrollVector.dy)) / FBTouchEventDelay);
+  scrollViewWrapped = [FBXCElementSnapshotWrapper ensureWrapped:[scrollViewElement fb_customSnapshot]];
+  CGRect scrollingFrame = FBScrollFrameInApplication(scrollViewWrapped.visibleFrame, screen, self.application);
   return [scrollViewWrapped fb_scrollByVector:scrollVector
-                                inApplication:self.application
+                                       inFrame:scrollingFrame
+                                anchorElement:scrollViewElement
+                                     velocity:velocity
                                         error:error];
 }
 
@@ -249,86 +346,108 @@ const CGFloat FBScrollTouchProportion = 0.75f;
 
 @implementation FBXCElementSnapshotWrapper (FBScrolling)
 
-- (CGRect)scrollingFrame
+- (BOOL)fb_scrollUpByNormalizedDistance:(CGFloat)distance
+                           anchorElement:(XCUIElement *)anchorElement
 {
-  return self.visibleFrame;
+  FBValidateScreenForScrolling();
+  return [self fb_scrollByNormalizedVector:CGVectorMake(0.0, distance) anchorElement:anchorElement error:nil];
 }
 
-- (void)fb_scrollUpByNormalizedDistance:(CGFloat)distance
-                          inApplication:(XCUIApplication *)application
+- (BOOL)fb_scrollDownByNormalizedDistance:(CGFloat)distance
+                             anchorElement:(XCUIElement *)anchorElement
 {
-  [self fb_scrollByNormalizedVector:CGVectorMake(0.0, distance) inApplication:application];
+  FBValidateScreenForScrolling();
+  return [self fb_scrollByNormalizedVector:CGVectorMake(0.0, -distance) anchorElement:anchorElement error:nil];
 }
 
-- (void)fb_scrollDownByNormalizedDistance:(CGFloat)distance
-                            inApplication:(XCUIApplication *)application
+- (BOOL)fb_scrollLeftByNormalizedDistance:(CGFloat)distance
+                             anchorElement:(XCUIElement *)anchorElement
 {
-  [self fb_scrollByNormalizedVector:CGVectorMake(0.0, -distance) inApplication:application];
+  FBValidateScreenForScrolling();
+  return [self fb_scrollByNormalizedVector:CGVectorMake(distance, 0.0) anchorElement:anchorElement error:nil];
 }
 
-- (void)fb_scrollLeftByNormalizedDistance:(CGFloat)distance
-                            inApplication:(XCUIApplication *)application
+- (BOOL)fb_scrollRightByNormalizedDistance:(CGFloat)distance
+                              anchorElement:(XCUIElement *)anchorElement
 {
-  [self fb_scrollByNormalizedVector:CGVectorMake(distance, 0.0) inApplication:application];
-}
-
-- (void)fb_scrollRightByNormalizedDistance:(CGFloat)distance
-                             inApplication:(XCUIApplication *)application
-{
-  [self fb_scrollByNormalizedVector:CGVectorMake(-distance, 0.0) inApplication:application];
+  FBValidateScreenForScrolling();
+  return [self fb_scrollByNormalizedVector:CGVectorMake(-distance, 0.0) anchorElement:anchorElement error:nil];
 }
 
 - (BOOL)fb_scrollByNormalizedVector:(CGVector)normalizedScrollVector
-                      inApplication:(XCUIApplication *)application
+                       anchorElement:(XCUIElement *)anchorElement
+                               error:(NSError **)error
 {
-  CGVector scrollVector = CGVectorMake(CGRectGetWidth(self.scrollingFrame) * normalizedScrollVector.dx,
-                                       CGRectGetHeight(self.scrollingFrame) * normalizedScrollVector.dy
+  XCUIScreen *screen = [FBScreen currentScreenWithError:error];
+  if (nil == screen) {
+    return NO;
+  }
+  CGRect frame = FBScrollFrameInApplication(self.visibleFrame, screen, anchorElement.application);
+  CGVector scrollVector = CGVectorMake(CGRectGetWidth(frame) * normalizedScrollVector.dx,
+                                       CGRectGetHeight(frame) * normalizedScrollVector.dy
                                        );
-  return [self fb_scrollByVector:scrollVector inApplication:application error:nil];
+  return [self fb_scrollByVector:scrollVector inFrame:frame anchorElement:anchorElement velocity:FBTouchVelocity error:error];
 }
 
 - (BOOL)fb_scrollByVector:(CGVector)vector
-            inApplication:(XCUIApplication *)application
-                    error:(NSError **)error
+                     inFrame:(CGRect)frame
+             anchorElement:(XCUIElement *)anchorElement
+                  velocity:(CGFloat)velocity
+                     error:(NSError **)error
 {
-  CGVector scrollBoundingVector = CGVectorMake(
-                                               CGRectGetWidth(self.scrollingFrame) * FBScrollTouchProportion,
-                                               CGRectGetHeight(self.scrollingFrame) * FBScrollTouchProportion
-                                               );
-  scrollBoundingVector.dx = (CGFloat)floor(copysign(scrollBoundingVector.dx, vector.dx));
-  scrollBoundingVector.dy = (CGFloat)floor(copysign(scrollBoundingVector.dy, vector.dy));
-
+  // Keep the vector and clipped frame in the same coordinate space throughout
+  // this multi-drag gesture. Rotation or folding during a gesture is unsupported.
   NSInteger preciseScrollAttemptsCount = 20;
   CGVector CGZeroVector = CGVectorMake(0, 0);
   BOOL shouldFinishScrolling = NO;
   while (!shouldFinishScrolling) {
+    CGVector scrollBoundingVector = CGVectorMake(
+      (CGFloat)floor(copysign(CGRectGetWidth(frame) * FBScrollTouchProportion, vector.dx)),
+      (CGFloat)floor(copysign(CGRectGetHeight(frame) * FBScrollTouchProportion, vector.dy)));
     CGVector scrollVector = CGVectorMake(fabs(vector.dx) > fabs(scrollBoundingVector.dx) ? scrollBoundingVector.dx : vector.dx,
                                          fabs(vector.dy) > fabs(scrollBoundingVector.dy) ? scrollBoundingVector.dy : vector.dy);
     vector = CGVectorMake(vector.dx - scrollVector.dx, vector.dy - scrollVector.dy);
     shouldFinishScrolling = FBVectorFuzzyEqualToVector(vector, CGZeroVector, 1) || --preciseScrollAttemptsCount <= 0;
-    if (![self fb_scrollAncestorScrollViewByVectorWithinScrollViewFrame:scrollVector inApplication:application error:error]){
+    if (![self fb_scrollAncestorScrollViewByVectorWithinScrollViewFrame:scrollVector
+                                                               inFrame:frame
+                                                         anchorElement:anchorElement
+                                                              velocity:velocity
+                                                                 error:error]) {
       return NO;
     }
   }
   return YES;
 }
 
-- (CGVector)fb_hitPointOffsetForScrollingVector:(CGVector)scrollingVector
+// Normalized (0.0-1.0) touch-down offset within the scrolling frame, for the given
+// scroll vector's direction.
+- (CGVector)fb_normalizedHitPointOffsetForScrollingVector:(CGVector)scrollingVector
 {
-  CGFloat x = CGRectGetMinX(self.scrollingFrame) + CGRectGetWidth(self.scrollingFrame) * (scrollingVector.dx < 0.0f ? FBScrollTouchProportion : (1 - FBScrollTouchProportion));
-  CGFloat y = CGRectGetMinY(self.scrollingFrame) + CGRectGetHeight(self.scrollingFrame) * (scrollingVector.dy < 0.0f ? FBScrollTouchProportion : (1 - FBScrollTouchProportion));
-  return CGVectorMake((CGFloat)floor(x), (CGFloat)floor(y));
+  CGFloat x = scrollingVector.dx < 0.0f ? FBScrollTouchProportion : (1 - FBScrollTouchProportion);
+  CGFloat y = scrollingVector.dy < 0.0f ? FBScrollTouchProportion : (1 - FBScrollTouchProportion);
+  return CGVectorMake(x, y);
 }
 
 - (BOOL)fb_scrollAncestorScrollViewByVectorWithinScrollViewFrame:(CGVector)vector
-                                                   inApplication:(XCUIApplication *)application
-                                                           error:(NSError **)error
+                                                               inFrame:(CGRect)scrollingFrame
+                                                     anchorElement:(XCUIElement *)anchorElement
+                                                          velocity:(CGFloat)velocity
+                                                             error:(NSError **)error
 {
-  CGVector hitpointOffset = [self fb_hitPointOffsetForScrollingVector:vector];
+  // wdFrame matches scrollingFrame's coordinate space; raw .frame can be pre-scaled or
+  // dimension-swapped and drift out of sync with it (appium/appium#16185).
+  CGRect anchorFrame = anchorElement.wdFrame;
+  if (CGRectIsEmpty(scrollingFrame) || CGRectIsEmpty(anchorFrame)) {
+    return [[[FBErrorBuilder builder]
+             withDescriptionFormat:@"Cannot compute a scroll gesture for '%@': its frame is empty", self.fb_description]
+            buildError:error];
+  }
 
-  XCUICoordinate *appCoordinate = [[XCUICoordinate alloc] initWithElement:application normalizedOffset:CGVectorMake(0.0, 0.0)];
-  XCUICoordinate *startCoordinate = [[XCUICoordinate alloc] initWithCoordinate:appCoordinate pointsOffset:hitpointOffset];
-  XCUICoordinate *endCoordinate = [[XCUICoordinate alloc] initWithCoordinate:startCoordinate pointsOffset:vector];
+  CGVector proportion = [self fb_normalizedHitPointOffsetForScrollingVector:vector];
+  CGVector startOffset, endOffset;
+  FBScrollGestureOffsets(scrollingFrame, anchorFrame, proportion, vector, &startOffset, &endOffset);
+  XCUICoordinate *startCoordinate = [anchorElement coordinateWithNormalizedOffset:startOffset];
+  XCUICoordinate *endCoordinate = [anchorElement coordinateWithNormalizedOffset:endOffset];
 
   if (FBPointFuzzyEqualToPoint(startCoordinate.screenPoint, endCoordinate.screenPoint, FBFuzzyPointThreshold)) {
     return YES;
@@ -336,7 +455,7 @@ const CGFloat FBScrollTouchProportion = 0.75f;
 
   [startCoordinate pressForDuration:FBTouchEventDelay
                thenDragToCoordinate:endCoordinate
-                       withVelocity:FBTouchVelocity
+                       withVelocity:velocity
                 thenHoldForDuration:FBTouchEventDelay];
   return YES;
 }

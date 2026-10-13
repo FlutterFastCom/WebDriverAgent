@@ -9,6 +9,9 @@
 #import <XCTest/XCTest.h>
 
 #import "FBIntegrationTestCase.h"
+#import "FBConfiguration.h"
+#import "FBMathUtils.h"
+#import "FBScreen.h"
 
 #import "XCUIElement.h"
 #import "XCUIDevice.h"
@@ -17,6 +20,11 @@
 #import "XCUIDevice+FBRotation.h"
 #import "FBRunLoopSpinner.h"
 #import "FBXCodeCompatibility.h"
+#import "FBW3CActionsSynthesizer.h"
+#import "XCSynthesizedEventRecord.h"
+#import "XCPointerEventPath.h"
+#import "XCPointerEvent.h"
+#import "XCUIScreen.h"
 
 @interface FBW3CTouchActionsIntegrationTestsPart1 : FBIntegrationTestCase
 @end
@@ -28,9 +36,36 @@
 
 @implementation FBW3CTouchActionsIntegrationTestsPart1
 
+- (void)testDisplayIndependentActionsAfterSelectedDisplayDisappears
+{
+  // setUp already opens the Alerts fixture; relaunching would reset that page
+  // and break the subsequent touch tests that share it.
+  NSNumber *previous = FBConfiguration.sharedInstance.currentDisplayId;
+  [self addTeardownBlock:^{ FBConfiguration.sharedInstance.currentDisplayId = previous; }];
+  NSArray *sequences = @[
+    @{@"id": @"keyboard", @"type": @"key", @"actions": @[@{@"type": @"keyDown", @"value": @"a"}, @{@"type": @"keyUp", @"value": @"a"}]},
+    @{@"id": @"finger", @"type": @"pointer", @"parameters": @{@"pointerType": @"touch"}, @"actions": @[@{@"type": @"pause", @"duration": @10}]}
+  ];
+  for (NSDictionary *sequence in sequences) {
+    for (NSNumber *display in @[@1, @987654]) {
+      FBConfiguration.sharedInstance.currentDisplayId = display;
+      NSError *error = nil;
+      FBW3CActionsSynthesizer *synthesizer = [[FBW3CActionsSynthesizer alloc] initWithActions:@[sequence] forApplication:self.testedApplication elementCache:nil error:&error];
+      XCSynthesizedEventRecord *record = [synthesizer synthesizeWithError:&error];
+      XCTAssertNotNil(record, @"Display-independent %@ should succeed: %@", sequence[@"type"], error);
+    }
+  }
+}
+
 - (void)verifyGesture:(NSArray<NSDictionary<NSString *, id> *> *)gesture orientation:(UIDeviceOrientation)orientation
 {
   [[XCUIDevice sharedDevice] fb_setDeviceInterfaceOrientation:orientation];
+  // XCTest may report the new interface orientation while the Alerts button
+  // still has transposed geometry from the rotation transition. The fixture's
+  // button is wider than it is tall in every settled orientation. Wait for that
+  // layout before resolving the W3C action's element-origin coordinates.
+  XCUIElement *button = self.testedApplication.buttons[FBShowAlertButtonName];
+  FBAssertWaitTillBecomesTrue(CGRectGetWidth(button.frame) > CGRectGetHeight(button.frame));
   NSError *error;
   XCTAssertTrue([self.testedApplication fb_performW3CActions:gesture elementCache:nil error:&error]);
   FBAssertWaitTillBecomesTrue(self.testedApplication.alerts.count > 0);
@@ -49,9 +84,104 @@
 
 - (void)tearDown
 {
+  FBConfiguration.sharedInstance.currentDisplayId = nil;
   [self clearAlert];
   [self resetOrientation];
   [super tearDown];
+}
+
+- (nullable XCSynthesizedEventRecord *)tapRecordWithError:(NSError **)error
+{
+  NSArray *gesture = @[@{
+    @"type": @"pointer", @"id": @"finger", @"parameters": @{@"pointerType": @"touch"},
+    @"actions": @[
+      @{@"type": @"pointerMove", @"x": @100, @"y": @100, @"duration": @0},
+      @{@"type": @"pointerDown", @"button": @0},
+      @{@"type": @"pointerUp", @"button": @0},
+    ],
+  }];
+  FBW3CActionsSynthesizer *synthesizer = [[FBW3CActionsSynthesizer alloc] initWithActions:gesture
+                                                                           forApplication:self.testedApplication
+                                                                             elementCache:nil
+                                                                                    error:error];
+  return [synthesizer synthesizeWithError:error];
+}
+
+- (NSArray<XCPointerEvent *> *)pointerEventsOfRecord:(XCSynthesizedEventRecord *)record
+{
+  XCPointerEventPath *eventPath = record.eventPaths.firstObject;
+  return eventPath.pointerEvents;
+}
+
+- (void)testMainDisplaySettingKeepsDefaultCoordinates
+{
+  for (NSNumber *orientation in @[@(UIDeviceOrientationPortrait),
+                                  @(UIDeviceOrientationLandscapeLeft),
+                                  @(UIDeviceOrientationLandscapeRight)]) {
+    [[XCUIDevice sharedDevice] fb_setDeviceInterfaceOrientation:orientation.integerValue];
+    NSError *error = nil;
+    FBConfiguration.sharedInstance.currentDisplayId = nil;
+    XCSynthesizedEventRecord *baseline = [self tapRecordWithError:&error];
+    FBConfiguration.sharedInstance.currentDisplayId = @([FBScreen displayID]);
+    XCSynthesizedEventRecord *selected = [self tapRecordWithError:&error];
+    XCTAssertNotNil(baseline);
+    XCTAssertNotNil(selected);
+    XCTAssertNil(error);
+    NSArray<XCPointerEvent *> *baselineEvents = [self pointerEventsOfRecord:baseline];
+    NSArray<XCPointerEvent *> *selectedEvents = [self pointerEventsOfRecord:selected];
+    XCTAssertEqual(baselineEvents.count, selectedEvents.count);
+    for (NSUInteger i = 0; i < baselineEvents.count; i++) {
+      XCTAssertTrue(CGPointEqualToPoint(baselineEvents[i].coordinate, selectedEvents[i].coordinate));
+    }
+  }
+}
+
+- (void)testUnavailableDisplaySettingIsRejected
+{
+  long long maxID = 0;
+  for (NSDictionary<NSString *, id> *screen in [FBScreen screensWithError:nil]) {
+    maxID = MAX(maxID, [screen[@"displayId"] longLongValue]);
+  }
+  FBConfiguration.sharedInstance.currentDisplayId = @(maxID + 1);
+  NSError *error = nil;
+  XCTAssertNil([self tapRecordWithError:&error]);
+  XCTAssertNotNil(error);
+}
+
+- (void)testSecondaryDisplaySetting
+{
+  XCUIScreen *secondary = nil;
+  NSError *error = nil;
+  NSArray<NSDictionary<NSString *, id> *> *screens = [FBScreen screensWithError:&error];
+  XCTAssertNotNil(screens);
+  XCTAssertNil(error);
+  for (NSDictionary<NSString *, id> *screen in screens) {
+    long long displayID = [screen[@"displayId"] longLongValue];
+    if (displayID != [FBScreen displayID]) {
+      secondary = [FBScreen screenWithDisplayID:displayID error:&error];
+      XCTAssertNotNil(secondary);
+      XCTAssertNil(error);
+      break;
+    }
+  }
+  if (nil == secondary) {
+    XCTSkip(@"The device has no secondary display");
+  }
+  XCSynthesizedEventRecord *baseline = [self tapRecordWithError:&error];
+  FBConfiguration.sharedInstance.currentDisplayId = @(secondary.displayID);
+  XCSynthesizedEventRecord *selected = [self tapRecordWithError:&error];
+  XCTAssertNotNil(selected);
+  XCTAssertNil(error);
+  XCTAssertEqual(selected.displayID, (unsigned long long)secondary.displayID);
+  XCUIScreen *main = XCUIScreen.mainScreen;
+  CGVector offset = FBDisplayCoordinateOffset(
+    CGSizeMake(main.bounds.size.width / main.scale, main.bounds.size.height / main.scale),
+    CGSizeMake(secondary.bounds.size.width / secondary.scale, secondary.bounds.size.height / secondary.scale),
+    selected.interfaceOrientation);
+  CGPoint expected = [self pointerEventsOfRecord:baseline].firstObject.coordinate;
+  CGPoint actual = [self pointerEventsOfRecord:selected].firstObject.coordinate;
+  XCTAssertEqual(actual.x, expected.x + offset.dx);
+  XCTAssertEqual(actual.y, expected.y + offset.dy);
 }
 
 - (void)testErroneousGestures
@@ -185,21 +315,6 @@
         },
       ],
     
-    // Chain element where action items start with an incorrect item
-    @[@{
-        @"type": @"pointer",
-        @"id": @"finger1",
-        @"parameters": @{@"pointerType": @"touch"},
-        @"actions": @[
-            @{@"type": @"pause", @"duration": @100},
-            @{@"type": @"pointerMove", @"duration": @0, @"x": @1, @"y": @1},
-            @{@"type": @"pointerDown"},
-            @{@"type": @"pause", @"duration": @100},
-            @{@"type": @"pointerUp"},
-            ],
-        },
-      ],
-    
     // Chain element where pointerMove action item does not contain coordinates
     @[@{
         @"type": @"pointer",
@@ -242,6 +357,37 @@
         },
       ],
     
+    // Chain element where a leading pause is followed directly by pointerDown,
+    // with no real pointerMove ever establishing a position
+    @[@{
+        @"type": @"pointer",
+        @"id": @"finger1",
+        @"parameters": @{@"pointerType": @"touch"},
+        @"actions": @[
+            @{@"type": @"pause", @"duration": @0},
+            @{@"type": @"pointerDown"},
+            @{@"type": @"pause", @"duration": @100},
+            @{@"type": @"pointerUp"},
+            ],
+        },
+      ],
+
+    // Chain element where a leading pause is followed directly by a relative
+    // pointerMove, with no real preceding position to be relative to
+    @[@{
+        @"type": @"pointer",
+        @"id": @"finger1",
+        @"parameters": @{@"pointerType": @"touch"},
+        @"actions": @[
+            @{@"type": @"pause", @"duration": @0},
+            @{@"type": @"pointerMove", @"duration": @0, @"origin": @"pointer"},
+            @{@"type": @"pointerDown"},
+            @{@"type": @"pause", @"duration": @100},
+            @{@"type": @"pointerUp"},
+            ],
+        },
+      ],
+
     // Chain element where action items start with an incorrect one, because the correct one is canceled
     @[@{
         @"type": @"pointer",
@@ -297,6 +443,69 @@
       },
     ];
   [self verifyGesture:gesture orientation:UIDeviceOrientationPortrait];
+}
+
+- (void)testLeadingZeroDurationPauseDoesNotAddExtraTouch
+{
+  // A leading pause must not defeat the down-after-move dedup logic in
+  // FBPointerDownItem and make WDA synthesize a second, separate touch-down
+  // for the same finger. Inspect the actual synthesized XCTest event stream
+  // (without dispatching it) rather than only checking the gesture's visible
+  // side effect, since a duplicate touch at the same point may still produce
+  // the same visible outcome.
+  XCUIElement *element = self.testedApplication.buttons[FBShowAlertButtonName];
+  NSDictionary<NSString *, id> *(^sequenceWithLeadingPause)(BOOL) = ^NSDictionary<NSString *, id> *(BOOL withLeadingPause) {
+    NSMutableArray<NSDictionary<NSString *, id> *> *actions = [NSMutableArray array];
+    if (withLeadingPause) {
+      [actions addObject:@{@"type": @"pause", @"duration": @0}];
+    }
+    [actions addObjectsFromArray:@[
+      @{@"type": @"pointerMove", @"duration": @0, @"origin": element, @"x": @0, @"y": @0},
+      @{@"type": @"pointerDown"},
+      @{@"type": @"pause", @"duration": @100},
+      @{@"type": @"pointerUp"},
+      ]];
+    return @{
+      @"type": @"pointer",
+      @"id": @"finger1",
+      @"parameters": @{@"pointerType": @"touch"},
+      @"actions": actions.copy,
+      };
+  };
+
+  NSError *error;
+  FBW3CActionsSynthesizer *baselineSynthesizer =
+  [[FBW3CActionsSynthesizer alloc] initWithActions:@[sequenceWithLeadingPause(NO)]
+                                     forApplication:self.testedApplication
+                                       elementCache:nil
+                                              error:&error];
+  XCTAssertNotNil(baselineSynthesizer);
+  XCSynthesizedEventRecord *baselineRecord = [baselineSynthesizer synthesizeWithError:&error];
+  XCTAssertNotNil(baselineRecord, @"%@", error);
+
+  FBW3CActionsSynthesizer *pausedSynthesizer =
+  [[FBW3CActionsSynthesizer alloc] initWithActions:@[sequenceWithLeadingPause(YES)]
+                                     forApplication:self.testedApplication
+                                       elementCache:nil
+                                              error:&error];
+  XCTAssertNotNil(pausedSynthesizer);
+  XCSynthesizedEventRecord *pausedRecord = [pausedSynthesizer synthesizeWithError:&error];
+  XCTAssertNotNil(pausedRecord, @"%@", error);
+
+  XCTAssertEqual(baselineRecord.eventPaths.count, (NSUInteger)1);
+  XCTAssertEqual(pausedRecord.eventPaths.count, baselineRecord.eventPaths.count);
+
+  XCPointerEventPath *baselinePath = baselineRecord.eventPaths.firstObject;
+  XCPointerEventPath *pausedPath = pausedRecord.eventPaths.firstObject;
+  XCTAssertEqual(pausedPath.pointerEvents.count, baselinePath.pointerEvents.count);
+  for (NSUInteger i = 0; i < baselinePath.pointerEvents.count; i++) {
+    XCPointerEvent *baselineEvent = baselinePath.pointerEvents[i];
+    XCPointerEvent *pausedEvent = pausedPath.pointerEvents[i];
+    XCTAssertEqual(pausedEvent.eventType, baselineEvent.eventType);
+    XCTAssertEqualWithAccuracy(pausedEvent.offset, baselineEvent.offset, 0.001);
+    XCTAssertEqualWithAccuracy(pausedEvent.coordinate.x, baselineEvent.coordinate.x, 0.001);
+    XCTAssertEqualWithAccuracy(pausedEvent.coordinate.y, baselineEvent.coordinate.y, 0.001);
+  }
 }
 
 - (void)testDoubleTap
