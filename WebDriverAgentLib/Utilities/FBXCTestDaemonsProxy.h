@@ -26,6 +26,12 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)synthesizeEventWithRecord:(XCSynthesizedEventRecord *)record
                             error:(NSError *__autoreleasing*)error;
 
+/** Raw-only one-shot synthesis; timeout does not prove non-delivery. */
++ (BOOL)synthesizeEventWithRecord:(XCSynthesizedEventRecord *)record
+                          timeout:(NSTimeInterval)timeout
+                       didTimeOut:(BOOL *)didTimeOut
+                            error:(NSError **)error;
+
 + (BOOL)openURL:(NSURL *)url usingApplication:(NSString *)bundleId error:(NSError **)error;
 + (BOOL)openDefaultApplicationForURL:(NSURL *)url error:(NSError **)error;
 

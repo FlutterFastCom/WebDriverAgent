@@ -7,6 +7,7 @@
  */
 
 #import "FBCustomEndpointTokens.h"
+#import <TargetConditionals.h>
 
 NSArray<NSString *> *FBCustomEndpointTokensList(void)
 {
@@ -45,6 +46,17 @@ NSArray<NSString *> *FBCustomEndpointTokensList(void)
       @"keyboard.type-with-delay",
       @"touch.swipe-bezier",
       @"keyboard.clear-field",
+#if !TARGET_OS_TV && !TARGET_OS_WATCH
+      @"raw.tap",
+      @"raw.swipe",
+      @"raw.screen",
+      @"raw.long-press",
+      @"raw.scroll",
+      @"raw.swipe-bezier",
+      @"raw.keyboard.type-with-delay",
+      @"raw.keyboard.clear-field",
+      @"raw.apps.state",
+#endif
     ];
   });
   return tokens;

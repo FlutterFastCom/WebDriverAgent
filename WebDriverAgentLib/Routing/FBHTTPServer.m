@@ -63,6 +63,7 @@ static BOOL FBParseContentLength(NSString *value, NSUInteger *outLength)
 
 @interface FBHTTPRoute : NSObject
 @property (nonatomic, copy) NSString *verb;
+@property (nonatomic, copy) NSString *path;
 @property (nonatomic, strong) NSRegularExpression *regex;
 @property (nonatomic, copy, nullable) NSArray<NSString *> *keys;
 @property (nonatomic, copy) void (^block)(RouteRequest *request, RouteResponse *response);
@@ -81,6 +82,7 @@ static BOOL FBParseContentLength(NSString *value, NSUInteger *outLength)
 @property (nonatomic, copy) NSString *pathAndQuery;
 @property (nonatomic) NSUInteger bodyStart;
 @property (nonatomic) NSUInteger contentLength;
+@property (nonatomic) BOOL closeAfterResponse;
 @end
 
 @implementation FBPendingHTTPRequestHeader
@@ -91,14 +93,16 @@ static BOOL FBParseContentLength(NSString *value, NSUInteger *outLength)
 // requests sharing a connection are never conflated into a single tracked entry.
 @interface FBPendingRequest : NSObject
 @property (nonatomic, strong, readonly) nw_connection_t client;
+@property (nonatomic, readonly) BOOL closeAfterResponse;
 @end
 
 @implementation FBPendingRequest
 
-- (instancetype)initWithClient:(nw_connection_t)client
+- (instancetype)initWithClient:(nw_connection_t)client closeAfterResponse:(BOOL)closeAfterResponse
 {
   if ((self = [super init])) {
     _client = client;
+    _closeAfterResponse = closeAfterResponse;
   }
   return self;
 }
@@ -186,6 +190,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
 - (FBHTTPRoute *)compiledRouteWithPath:(NSString *)path
 {
   FBHTTPRoute *route = [FBHTTPRoute new];
+  route.path = path;
   NSMutableArray<NSString *> *keys = [NSMutableArray array];
 
   // Escape regex-significant characters before substituting :param placeholders.
@@ -499,6 +504,9 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
       [self respondBadRequestToClient:client];
       return nil;
     }
+    if ([normalizedName isEqualToString:@"connection"] && nil != requestHeaders[normalizedName]) {
+      value = [requestHeaders[normalizedName] stringByAppendingFormat:@",%@", value];
+    }
     requestHeaders[normalizedName] = value;
   }
   return requestHeaders;
@@ -580,6 +588,13 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
   pending.pathAndQuery = requestLineParts[1];
   pending.bodyStart = headerEndRange.location + headerEndRange.length;
   pending.contentLength = contentLength;
+  NSCharacterSet *httpWhitespace = [NSCharacterSet characterSetWithCharactersInString:@" \t"];
+  for (NSString *token in [requestHeaders[@"connection"] componentsSeparatedByString:@","]) {
+    if ([[token stringByTrimmingCharactersInSet:httpWhitespace] caseInsensitiveCompare:@"close"] == NSOrderedSame) {
+      pending.closeAfterResponse = YES;
+      break;
+    }
+  }
   return pending;
 }
 
@@ -607,7 +622,13 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
   NSData *body = pending.contentLength > 0 ? [buffer subdataWithRange:NSMakeRange(pending.bodyStart, pending.contentLength)] : [NSData data];
 
   @synchronized (self.connectionBuffers) {
-    [buffer replaceBytesInRange:NSMakeRange(0, totalRequestLength) withBytes:NULL length:0];
+    if (pending.closeAfterResponse) {
+      // No subsequent bytes may dispatch or grow this client's buffer while its response runs.
+      [buffer setLength:0];
+      [self.connectionBuffers removeObjectForKey:client];
+    } else {
+      [buffer replaceBytesInRange:NSMakeRange(0, totalRequestLength) withBytes:NULL length:0];
+    }
     [self.pendingRequestHeaders removeObjectForKey:client];
     [self.connectionsAwaitingResponse addObject:client];
     if (0 == buffer.length) {
@@ -620,7 +641,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
     }
   }
 
-  [self dispatchMethod:pending.method pathAndQuery:pending.pathAndQuery body:body client:client];
+  [self dispatchMethod:pending.method pathAndQuery:pending.pathAndQuery body:body client:client closeAfterResponse:pending.closeAfterResponse];
 }
 
 // Removes the client's buffered state and responds with a closing error response. Removing the
@@ -652,7 +673,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
   }];
 }
 
-- (void)dispatchMethod:(NSString *)method pathAndQuery:(NSString *)pathAndQuery body:(NSData *)body client:(nw_connection_t)client
+- (void)dispatchMethod:(NSString *)method pathAndQuery:(NSString *)pathAndQuery body:(NSData *)body client:(nw_connection_t)client closeAfterResponse:(BOOL)closeAfterResponse
 {
   NSURLComponents *requestTarget = [NSURLComponents componentsWithString:pathAndQuery];
   NSString *path = requestTarget.path ?: pathAndQuery;
@@ -683,21 +704,23 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
     RouteResponse *response = [RouteResponse new];
     [self applyDefaultHeadersToResponse:response];
 
-    NSString *sessionID = params[@"sessionID"];
+    // Raw routes are sessionless even when a forbidden query key is named sessionID.
+    // Their command validators, not legacy session admission, must refuse that query.
+    NSString *sessionID = [route.path hasPrefix:@"/wda/raw/"] ? nil : params[@"sessionID"];
     if (route.isStandalone) {
       // DELETE triggers -abandonPendingRequestsForSessionID: itself; tracking its own request
       // would make it abandon itself and write a response twice.
       NSString *trackedSessionID = [route.verb isEqualToString:@"DELETE"] ? nil : sessionID;
-      [self dispatchStandaloneRoute:route request:request response:response client:client method:method pathAndQuery:pathAndQuery sessionID:trackedSessionID];
+      [self dispatchStandaloneRoute:route request:request response:response client:client method:method pathAndQuery:pathAndQuery sessionID:trackedSessionID closeAfterResponse:closeAfterResponse];
       return;
     }
 
     FBPendingRequest *pendingRequest = nil;
     if (nil != sessionID) {
-      pendingRequest = [[FBPendingRequest alloc] initWithClient:client];
+      pendingRequest = [[FBPendingRequest alloc] initWithClient:client closeAfterResponse:closeAfterResponse];
       RouteResponse *abandonedResponse = [self trackPendingRequest:pendingRequest forSessionID:sessionID];
       if (nil != abandonedResponse) {
-        [self writeResponse:abandonedResponse toClient:client];
+        [self writeResponse:abandonedResponse toClient:client thenCloseConnection:closeAfterResponse];
         return;
       }
     }
@@ -708,7 +731,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
       // completion, or -abandonPendingRequestsForSessionID: on another thread.
       BOOL shouldRespond = (nil == pendingRequest) || [self untrackPendingRequest:pendingRequest forSessionID:sessionID];
       if (shouldRespond) {
-        [self writeResponse:response toClient:client];
+        [self writeResponse:response toClient:client thenCloseConnection:closeAfterResponse];
       }
     };
     dispatch_queue_t routeQueue = self.routeQueue;
@@ -725,7 +748,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
                                                                    traceback:nil];
   [FBResponseWithStatus(status) dispatchWithResponse:notFound];
   [self applyDefaultHeadersToResponse:notFound];
-  [self writeResponse:notFound toClient:client];
+  [self writeResponse:notFound toClient:client thenCloseConnection:closeAfterResponse];
 }
 
 #pragma mark - Session-scoped request cancellation
@@ -780,7 +803,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
     [self.pendingSessionRequests removeObjectForKey:sessionID];
   }
   for (FBPendingRequest *pendingRequest in pendingRequests) {
-    [self writeResponse:response toClient:pendingRequest.client];
+    [self writeResponse:response toClient:pendingRequest.client thenCloseConnection:pendingRequest.closeAfterResponse];
   }
 }
 
@@ -793,14 +816,15 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
                           method:(NSString *)method
                     pathAndQuery:(NSString *)pathAndQuery
                        sessionID:(nullable NSString *)sessionID
+              closeAfterResponse:(BOOL)closeAfterResponse
 {
   // Includes the query string so requests with different params are never coalesced together.
   NSString *key = [NSString stringWithFormat:@"%@ %@", method, pathAndQuery];
-  FBPendingRequest *waiter = [[FBPendingRequest alloc] initWithClient:client];
+  FBPendingRequest *waiter = [[FBPendingRequest alloc] initWithClient:client closeAfterResponse:closeAfterResponse];
   if (nil != sessionID) {
     RouteResponse *abandonedResponse = [self trackPendingRequest:waiter forSessionID:sessionID];
     if (nil != abandonedResponse) {
-      [self writeResponse:abandonedResponse toClient:client];
+      [self writeResponse:abandonedResponse toClient:client thenCloseConnection:waiter.closeAfterResponse];
       return;
     }
   }
@@ -836,7 +860,7 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
     for (FBPendingRequest *joinedWaiter in [@[waiter] arrayByAddingObjectsFromArray:joinedWaiters]) {
       BOOL shouldRespond = (nil == sessionID) || [strongSelf untrackPendingRequest:joinedWaiter forSessionID:sessionID];
       if (shouldRespond) {
-        [strongSelf writeResponse:response toClient:joinedWaiter.client];
+        [strongSelf writeResponse:response toClient:joinedWaiter.client thenCloseConnection:joinedWaiter.closeAfterResponse];
       }
     }
   });
@@ -856,6 +880,14 @@ static const int64_t FBStaleConnectionSweepIntervalSec = 10;
 
   NSData *body = response.responseData ?: [NSData data];
   NSMutableDictionary<NSString *, NSString *> *headers = response.headers.mutableCopy;
+  if (shouldClose) {
+    for (NSString *field in headers.allKeys) {
+      if ([field caseInsensitiveCompare:@"Connection"] == NSOrderedSame) {
+        [headers removeObjectForKey:field];
+      }
+    }
+    headers[@"Connection"] = @"close";
+  }
   if (nil == headers[@"Content-Length"]) {
     headers[@"Content-Length"] = [NSString stringWithFormat:@"%lu", (unsigned long)body.length];
   }

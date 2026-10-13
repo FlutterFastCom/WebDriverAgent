@@ -238,7 +238,23 @@ static NSString *const FBServerURLEndMarker = @"<-ServerURLHere";
         if (nil == strongSelf) {
           return;
         }
-        NSDictionary *arguments = [NSJSONSerialization JSONObjectWithData:request.body options:NSJSONReadingMutableContainers error:NULL];
+        NSDictionary *arguments;
+        if ([route.path hasPrefix:@"/wda/raw/"]) {
+          if (request.body.length == 0) {
+            arguments = @{};
+          } else {
+            NSError *parseError = nil;
+            id parsed = [NSJSONSerialization JSONObjectWithData:request.body options:NSJSONReadingMutableContainers error:&parseError];
+            if (nil != parseError || ![parsed isKindOfClass:NSDictionary.class]) {
+              [FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"Raw route body must be a JSON object"
+                                                                            traceback:nil]) dispatchWithResponse:response];
+              return;
+            }
+            arguments = parsed;
+          }
+        } else {
+          arguments = [NSJSONSerialization JSONObjectWithData:request.body options:NSJSONReadingMutableContainers error:NULL];
+        }
         FBRouteRequest *routeParams = [FBRouteRequest
           routeRequestWithURL:request.url
           parameters:request.params

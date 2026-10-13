@@ -58,6 +58,106 @@ Requests fail if no such window exists on the selected display.
 
 This gesture support builds on [#1269](https://github.com/appium/WebDriverAgent/pull/1269).
 
+## Additive accessibility-free raw input (iOS/iPadOS)
+
+The following ordinary, sessionless routes are additive; existing accessibility,
+geometry, keyboard, app-state, and cached-foreground routes retain their original
+registrations, request/response contracts, and display/orientation authority.
+Raw routes are not available on tvOS or watchOS. `/status.customEndpoints`
+advertises these nine exact tokens; raw consumers must require the complete set
+and must not silently fall back to an accessibility route.
+
+| Route | Closed JSON body | Capability token |
+| --- | --- | --- |
+| `POST /wda/raw/tap` | `{x,y}` finite logical coordinates | `raw.tap` |
+| `POST /wda/raw/swipe` | `{fromX,fromY,toX,toY,duration}`; seconds in `[0.01,10]` | `raw.swipe` |
+| `GET /wda/raw/screen` | No fields; returns `{width,height,scale}` | `raw.screen` |
+| `POST /wda/raw/long-press` | `{x,y,duration}`; seconds in `[0.01,10]` | `raw.long-press` |
+| `POST /wda/raw/scroll` | `{direction}`: case-sensitive `up`, `down`, `left`, `right` | `raw.scroll` |
+| `POST /wda/raw/swipe-bezier` | `{from,to,controlPoints,durationMs}` plus optional `held` below | `raw.swipe-bezier` |
+| `POST /wda/raw/keyboard/type-with-delay` | `{text,charDelayMs}` | `raw.keyboard.type-with-delay` |
+| `POST /wda/raw/keyboard/clear-field` | `{}` or `{approxChars}` | `raw.keyboard.clear-field` |
+| `POST /wda/raw/apps/state` | `{bundleId}` | `raw.apps.state` |
+
+All nine reject query parameters and unknown/missing body fields with W3C
+`invalid argument`. A zero-length HTTP body becomes `{}`. Every nonempty raw
+body must parse as a JSON object; malformed JSON, arrays, strings, numbers,
+Booleans, and `null` are refused before the route mounts. Non-raw routes retain
+their existing JSON parse/fallback behavior. JSON Booleans are not numbers;
+integer fields require exact nonnegative integers. Mutation success has a null
+W3C `value` and acknowledges only positive XCTest synthesis completion.
+
+Raw geometry and coordinate routes capture `XCUIScreen.mainScreen` once, without
+reading an application or accessibility tree. Logical dimensions are its bounds
+divided by its scale and must be finite, positive, and portrait (`width < height`).
+`currentDisplayId` must be unset or equal to that main display's captured ID;
+a selected secondary display is refused, never silently redirected. Every input
+point, including Bezier controls, must satisfy `0 <= x < width` and
+`0 <= y < height`. One portrait record targets the captured main display (or the
+main-screen runtime fallback on older XCTest). WDA does not inspect orientation,
+transform or clamp coordinates, hit-test, or infer a target application. This v1
+boundary excludes landscape and secondary-display pointer input. Keep pose
+stable: a rotation/fold/foreground change after capture does not retarget the
+record or guarantee its visible effect.
+
+Tap holds for `0.125` seconds. Swipe moves linearly and lifts at `duration`;
+long press lifts at `duration`. Scroll uses a `0.25`-second swipe through the
+central 60%: `up` moves the finger from `(50%,20%)` to `(50%,80%)`, `down`
+reverses it, `left` moves `(20%,50%)` to `(80%,50%)`, and `right` reverses it.
+These names describe content direction, not finger direction.
+
+Bezier `from`, `to`, and each control are exact `{x,y}` objects; at most 10
+controls are accepted. Without `held`, integer `durationMs` is in `[100,10000]`
+and the curve has `max(10,floor(durationMs/1000*60))` moves. The held shape adds
+exactly `held:{mode:"continuous_drag_v1",startHoldMs,moveSteps,endHoldMs}`,
+requires empty controls, `durationMs` in `[100,5000]`, each hold in `[0,2000]`,
+`moveSteps` in `[1,60]`, and total time at most `8000` ms. The finger stays down
+through the start hold, proportional moves, and end hold; raw curves do not use
+W3C action dictionaries or the legacy Bezier handler.
+
+Raw keyboard routes target the system's current keyboard focus. They do not
+consult `currentDisplayId`, reject secondary-display selection, or find, select,
+inspect, or verify an app, field, window, or keyboard. The caller establishes
+focus and verifies the visible result. Typing requires nonempty UTF-8 text of at
+most 8192 bytes and integer `charDelayMs` in `[0,5000]`; extended grapheme clusters
+are emitted in order at cumulative offsets, with total inter-key delay at most
+10000 ms. Clear emits exactly `approxChars` delete keys at 25 ms intervals,
+defaulting to 128 and accepting integers in `[1,256]`. Supply enough deletes for
+the focused value; neither success nor the clear count proves field contents.
+
+Raw app state accepts a caller-known nonempty UTF-8 bundle ID of at most 512
+bytes, constructs only that named application, and reads its XCTest `.state`
+once. It returns the original `bundleId`, numeric `state`, and `isForeground`
+true only for `XCUIApplicationStateRunningForeground`. It neither discovers an
+arbitrary foreground bundle nor initializes/reads `FBForegroundTracker`.
+Multiple bundles may have foreground state; this is not exclusive visible-surface
+ownership. Use screenshot evidence when the visible surface's identity matters.
+
+All raw routes share the existing main route queue, execute serially as distinct
+requests, and are deliberately not standalone: standalone coalescing omits the
+body. A raw request queued behind already-stuck AX work cannot bypass or rescue
+it. The supported condition is a **fresh WDA process with no AX-producing request
+submitted while the target application's accessibility tree is unresponsive**.
+A raw timeout releases only its own bounded wait, not earlier native work.
+
+Each mutation submits one record/path exactly once, requires finite record
+offsets in `[0,10]` seconds, and waits at most `maximumOffset + 2` seconds.
+A completion error or Boolean failure is W3C `unknown error`; expiry is HTTP 408
+W3C `timeout`: "Raw input synthesis timed out; physical delivery is uncertain
+and WDA did not retry." Late callbacks cannot alter that response or trigger a
+retry. A timed-out event may still affect the device after later queued work
+starts: response order is not physical-effect order. WDA does not cancel, retry,
+replay, deduplicate, or provide exactly-once delivery after a lost response.
+Success proves neither app identity, control activation, field content, UI
+settlement, nor a screenshot-confirmed effect.
+
+For every WDA route, a client's case-insensitive `Connection` token `close`
+(including comma lists and duplicate fields) now causes one complete response
+with `Connection: close`, then EOF after the write completes. Buffered or later
+requests on that client are discarded. Close is request/client-local even for
+standalone executions shared with keep-alive clients. Requests without the token
+retain existing keep-alive, ordering, pipelining, and abandonment behavior.
+
 ## Legacy SDK compatibility windows
 
 “Legacy SDK” here means the SDK used to build the app: the tested older app was

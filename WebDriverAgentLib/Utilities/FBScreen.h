@@ -10,7 +10,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef struct {
+  CGSize logicalSize;
+  double scale;
+  unsigned long long displayID;
+} FBRawMainScreenContext;
+
 @interface FBScreen : NSObject
+
+/** Captures finite portrait logical geometry from the main display only. */
++ (BOOL)rawPortraitMainScreenContext:(FBRawMainScreenContext *)context
+                               error:(NSError **)error;
 
 /**
  Information about all displays available to the device

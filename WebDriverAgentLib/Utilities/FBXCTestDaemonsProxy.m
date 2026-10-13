@@ -9,6 +9,8 @@
 #import "FBXCTestDaemonsProxy.h"
 
 #import <objc/runtime.h>
+#import <CoreFoundation/CoreFoundation.h>
+#import <math.h>
 
 #import "FBConfiguration.h"
 #import "FBErrorBuilder.h"
@@ -128,6 +130,72 @@ static void swizzledLaunchApp(id self, SEL _cmd, NSString *path, NSString *bundl
     return NO;
   }
   return YES;
+}
+
++ (BOOL)synthesizeEventWithRecord:(XCSynthesizedEventRecord *)record
+                          timeout:(NSTimeInterval)timeout
+                       didTimeOut:(BOOL *)didTimeOut
+                            error:(NSError **)error
+{
+  if (NULL != didTimeOut) {
+    *didTimeOut = NO;
+  }
+  if (nil == record || !isfinite(timeout) || timeout <= 0) {
+    return [[FBErrorBuilder.builder withDescription:@"Raw synthesis requires a record and finite positive timeout"] buildError:error];
+  }
+
+  NSObject *completionLock = [NSObject new];
+  NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + timeout;
+  __block BOOL finished = NO;
+  __block BOOL expired = NO;
+  __block BOOL succeeded = NO;
+  __block NSError *completionError = nil;
+  [[XCUIDevice.sharedDevice eventSynthesizer] synthesizeEvent:record completion:(id)^(BOOL result, NSError *invokeError) {
+    @synchronized (completionLock) {
+      if (finished) {
+        return;
+      }
+      finished = YES;
+      if (NSProcessInfo.processInfo.systemUptime >= deadline) {
+        expired = YES;
+        return;
+      }
+      succeeded = result && nil == invokeError;
+      completionError = invokeError;
+      if (!result && nil == invokeError) {
+        completionError = [[FBErrorBuilder.builder withDescription:@"Raw input synthesis completed with result NO"] build];
+      }
+    }
+  }];
+
+  while (YES) {
+    NSTimeInterval remaining;
+    @synchronized (completionLock) {
+      if (finished) {
+        break;
+      }
+      remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+      if (remaining <= 0) {
+        finished = YES;
+        expired = YES;
+        break;
+      }
+    }
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, MIN(remaining, 0.01), true);
+  }
+
+  @synchronized (completionLock) {
+    if (expired) {
+      if (NULL != didTimeOut) {
+        *didTimeOut = YES;
+      }
+      return [[FBErrorBuilder.builder withDescription:@"Raw input synthesis timed out; physical delivery is uncertain and WDA did not retry."] buildError:error];
+    }
+    if (!succeeded && NULL != error) {
+      *error = completionError;
+    }
+    return succeeded;
+  }
 }
 
 + (BOOL)openURL:(NSURL *)url usingApplication:(NSString *)bundleId error:(NSError *__autoreleasing*)error

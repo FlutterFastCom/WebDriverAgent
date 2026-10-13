@@ -14,6 +14,7 @@
 #import "XCUIDevice.h"
 #import "XCUIScreen.h"
 #import <objc/message.h>
+#import <math.h>
 
 static NSArray<XCUIScreen *> *FBScreensForDevice(id device, NSError **error)
 {
@@ -29,6 +30,33 @@ static NSArray<XCUIScreen *> *FBScreensForDevice(id device, NSError **error)
 }
 
 @implementation FBScreen
+
++ (BOOL)rawPortraitMainScreenContext:(FBRawMainScreenContext *)context error:(NSError **)error
+{
+  XCUIScreen *screen = XCUIScreen.mainScreen;
+  NSNumber *selectedDisplayID = FBConfiguration.sharedInstance.currentDisplayId;
+  if (nil == screen) {
+    return [[FBErrorBuilder.builder withDescription:@"Raw input requires an available main display"] buildError:error];
+  }
+  CGRect bounds = screen.bounds;
+  double scale = screen.scale;
+  unsigned long long displayID = screen.displayID;
+  if (nil != selectedDisplayID && ![selectedDisplayID isEqualToNumber:@(displayID)]) {
+    return [[FBErrorBuilder.builder withDescription:@"Raw coordinate input supports only the main display"] buildError:error];
+  }
+  if (!isfinite(bounds.size.width) || bounds.size.width <= 0
+      || !isfinite(bounds.size.height) || bounds.size.height <= 0
+      || !isfinite(scale) || scale <= 0) {
+    return [[FBErrorBuilder.builder withDescription:@"Raw input requires finite positive main-display bounds and scale"] buildError:error];
+  }
+  double width = bounds.size.width / scale;
+  double height = bounds.size.height / scale;
+  if (!isfinite(width) || width <= 0 || !isfinite(height) || height <= 0 || width >= height) {
+    return [[FBErrorBuilder.builder withDescription:@"Raw input requires finite positive portrait main-display geometry"] buildError:error];
+  }
+  *context = (FBRawMainScreenContext){CGSizeMake(width, height), scale, displayID};
+  return YES;
+}
 
 + (nullable NSArray<NSDictionary<NSString *, id> *> *)screensWithError:(NSError **)error
 {

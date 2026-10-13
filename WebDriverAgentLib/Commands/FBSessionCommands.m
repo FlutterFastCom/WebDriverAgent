@@ -47,6 +47,9 @@
     [[FBRoute POST:@"/wda/apps/activate"] respondWithTarget:self action:@selector(handleSessionAppActivate:)],
     [[FBRoute POST:@"/wda/apps/terminate"] respondWithTarget:self action:@selector(handleSessionAppTerminate:)],
     [[FBRoute POST:@"/wda/apps/state"] respondWithTarget:self action:@selector(handleSessionAppState:)],
+#if !TARGET_OS_TV && !TARGET_OS_WATCH
+    [[FBRoute POST:@"/wda/raw/apps/state"].withoutSession respondWithTarget:self action:@selector(handleRawAppState:)],
+#endif
     [[FBRoute GET:@"/wda/apps/list"] respondWithTarget:self action:@selector(handleGetActiveAppsList:)],
     [[FBRoute GET:@""] respondWithTarget:self action:@selector(handleGetActiveSession:)],
     [[FBRoute DELETE:@""].standalone respondWithTarget:self action:@selector(handleDeleteSession:)],
@@ -154,6 +157,35 @@
   NSUInteger state = [request.session applicationStateWithBundleId:(id)request.arguments[@"bundleId"]];
   return FBResponseWithObject(@(state));
 }
+
+#if !TARGET_OS_TV && !TARGET_OS_WATCH
++ (id<FBResponsePayload>)handleRawAppState:(FBRouteRequest *)request
+{
+  NSDictionary *arguments = request.arguments;
+  NSString *bundleID = arguments[@"bundleId"];
+  if (request.parameters.count != 0
+      || ![arguments isKindOfClass:NSDictionary.class]
+      || arguments.count != 1 || ![arguments.allKeys containsObject:@"bundleId"]
+      || ![bundleID isKindOfClass:NSString.class] || bundleID.length == 0) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"Raw app state requires only a nonempty bundleId string and no query parameters"
+                                                                    traceback:nil]);
+  }
+  NSData *utf8 = [bundleID dataUsingEncoding:NSUTF8StringEncoding];
+  if (nil == utf8 || utf8.length > 512) {
+    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"Raw app state bundleId must be UTF-8 and at most 512 bytes"
+                                                                    traceback:nil]);
+  }
+  @try {
+    XCUIApplication *app = [[XCUIApplication alloc] initWithBundleIdentifier:bundleID];
+    XCUIApplicationState state = app.state;
+    return FBResponseWithObject(@{@"bundleId": bundleID,
+                                  @"state": @(state),
+                                  @"isForeground": @(state == XCUIApplicationStateRunningForeground)});
+  } @catch (NSException *exception) {
+    return FBResponseWithStatus([FBCommandStatus unknownErrorWithMessage:exception.reason traceback:nil]);
+  }
+}
+#endif
 
 + (id<FBResponsePayload>)handleGetActiveAppsList:(FBRouteRequest *)request
 {
