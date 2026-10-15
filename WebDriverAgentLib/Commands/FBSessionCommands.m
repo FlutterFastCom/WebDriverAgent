@@ -180,7 +180,8 @@
     XCUIApplicationState state = app.state;
     return FBResponseWithObject(@{@"bundleId": bundleID,
                                   @"state": @(state),
-                                  @"isForeground": @(state == XCUIApplicationStateRunningForeground)});
+                                  // BOOL-typed so JSON carries true/false; a bare `==` is int and serializes as 0/1
+                                  @"isForeground": @((BOOL)(state == XCUIApplicationStateRunningForeground))});
   } @catch (NSException *exception) {
     return FBResponseWithStatus([FBCommandStatus unknownErrorWithMessage:exception.reason traceback:nil]);
   }
