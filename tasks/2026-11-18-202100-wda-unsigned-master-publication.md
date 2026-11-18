@@ -1,6 +1,6 @@
 # Publish permanent unsigned WDA masters from Titan tags
 
-Status: READY_FOR_IMPLEMENTATION
+Status: DONE
 Risk-Class: security
 Risk-Class-Justification: This introduces a bucket-scoped write credential and publishes executable input to the backend signing pipeline. Conditional object creation, source identity, unsigned packaging and a truthful publication record are security boundaries.
 Version-Impact: minor
