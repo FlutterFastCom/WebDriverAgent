@@ -1,0 +1,42 @@
+name: Publish unsigned WDA master to wda-masters
+
+on:
+  push:
+    tags: ['titan-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wda-master-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.deleted == false
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install publisher dependency
+        run: |
+          python -m venv "$RUNNER_TEMP/wda-master-venv"
+          "$RUNNER_TEMP/wda-master-venv/bin/python" -m pip install 'boto3==1.44.5'
+          echo "$RUNNER_TEMP/wda-master-venv/bin" >> "$GITHUB_PATH"
+      - name: Publish verified unsigned master
+        run: python Scripts/ci/publish-master.py
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_WDA_MASTERS_TOKEN_JSON: ${{ secrets.R2_WDA_MASTERS_TOKEN_JSON }}
+          GITHUB_TOKEN: ${{ github.token }}

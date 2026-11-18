@@ -81,7 +81,7 @@ fi
 # Re-codesign since we modified the bundle after Xcode signed it. Scheme
 # post-actions never receive EXPANDED_CODE_SIGN_IDENTITY, so the signer has to
 # be recovered from the already-signed bundle.
-if [ -d "$RUNNER_APP/_CodeSignature" ]; then
+if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -d "$RUNNER_APP/_CodeSignature" ]; then
     # Capture the signature info once. Piping codesign straight into
     # `awk ... exit` makes awk close the pipe early, killing codesign with
     # SIGPIPE -- which `set -o pipefail` turns into a fatal error. That trips
